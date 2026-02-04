@@ -99,6 +99,22 @@ export class SmithersDb {
       .orderBy(desc(smithersAttempts.attempt));
   }
 
+  async getAttempt(runId: string, nodeId: string, iteration: number, attempt: number) {
+    const rows = await this.db
+      .select()
+      .from(smithersAttempts)
+      .where(
+        and(
+          eq(smithersAttempts.runId, runId),
+          eq(smithersAttempts.nodeId, nodeId),
+          eq(smithersAttempts.iteration, iteration),
+          eq(smithersAttempts.attempt, attempt),
+        ),
+      )
+      .limit(1);
+    return rows[0];
+  }
+
   async listInProgressAttempts(runId: string) {
     return this.db
       .select()

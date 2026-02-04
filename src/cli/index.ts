@@ -7,6 +7,7 @@ import { SmithersDb } from "../db/adapter";
 import { ensureSmithersTables } from "../db/ensure";
 import { loadInput, loadOutputs } from "../db/snapshot";
 import { buildContext } from "../context";
+import { revertToAttempt } from "../revert";
 import type { SmithersWorkflow } from "../types";
 
 async function loadWorkflow(path: string): Promise<SmithersWorkflow<any>> {
@@ -119,6 +120,22 @@ async function main() {
     process.exit(0);
   }
 
+  if (cmd === "list") {
+    const workflowPath = args._[0];
+    if (!workflowPath) {
+      console.error("Missing workflow path");
+      process.exit(4);
+    }
+    const workflow = await loadWorkflow(workflowPath);
+    ensureSmithersTables(workflow.db as any);
+    const adapter = new SmithersDb(workflow.db as any);
+    const limit = args.limit ? Number(args.limit) : 50;
+    const status = args.status as string | undefined;
+    const runs = await adapter.listRuns(limit, status);
+    console.log(JSON.stringify(runs, null, 2));
+    process.exit(0);
+  }
+
   if (cmd === "graph") {
     const workflowPath = args._[0];
     if (!workflowPath) {
@@ -140,6 +157,34 @@ async function main() {
     const snap = await renderFrame(workflow, ctx);
     console.log(JSON.stringify(snap, null, 2));
     process.exit(0);
+  }
+
+  if (cmd === "revert") {
+    const workflowPath = args._[0];
+    if (!workflowPath) {
+      console.error("Missing workflow path");
+      process.exit(4);
+    }
+    const runId = args["run-id"];
+    const nodeId = args["node-id"];
+    const attempt = args.attempt !== undefined ? Number(args.attempt) : 1;
+    const iteration = args.iteration !== undefined ? Number(args.iteration) : 0;
+    if (!runId || !nodeId) {
+      console.error("Missing --run-id or --node-id");
+      process.exit(4);
+    }
+    const workflow = await loadWorkflow(workflowPath);
+    ensureSmithersTables(workflow.db as any);
+    const adapter = new SmithersDb(workflow.db as any);
+    const result = await revertToAttempt(adapter, {
+      runId,
+      nodeId,
+      iteration,
+      attempt,
+      onProgress: (e) => console.log(JSON.stringify(e)),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.success ? 0 : 1);
   }
 
   console.error(`Unknown command: ${cmd}`);

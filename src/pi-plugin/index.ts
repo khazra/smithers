@@ -12,20 +12,20 @@ async function post(path: string, body: any, base = DEFAULT_BASE) {
   return res.json();
 }
 
-export async function runWorkflow(args: { workflowPath: string; input: unknown; runId?: string }) {
-  return post("/v1/runs", { workflowPath: args.workflowPath, input: args.input, runId: args.runId });
+export async function runWorkflow(args: { workflowPath: string; input: unknown; runId?: string; baseUrl?: string }) {
+  return post("/v1/runs", { workflowPath: args.workflowPath, input: args.input, runId: args.runId }, args.baseUrl ?? DEFAULT_BASE);
 }
 
-export async function resume(args: { workflowPath: string; runId: string }) {
-  return post("/v1/runs", { workflowPath: args.workflowPath, runId: args.runId, resume: true });
+export async function resume(args: { workflowPath: string; runId: string; baseUrl?: string }) {
+  return post("/v1/runs", { workflowPath: args.workflowPath, runId: args.runId, resume: true }, args.baseUrl ?? DEFAULT_BASE);
 }
 
-export async function approve(args: { runId: string; nodeId: string; iteration?: number; note?: string }) {
-  return post(`/v1/runs/${args.runId}/nodes/${args.nodeId}/approve`, { iteration: args.iteration ?? 0, note: args.note });
+export async function approve(args: { runId: string; nodeId: string; iteration?: number; note?: string; baseUrl?: string }) {
+  return post(`/v1/runs/${args.runId}/nodes/${args.nodeId}/approve`, { iteration: args.iteration ?? 0, note: args.note }, args.baseUrl ?? DEFAULT_BASE);
 }
 
-export async function deny(args: { runId: string; nodeId: string; iteration?: number; note?: string }) {
-  return post(`/v1/runs/${args.runId}/nodes/${args.nodeId}/deny`, { iteration: args.iteration ?? 0, note: args.note });
+export async function deny(args: { runId: string; nodeId: string; iteration?: number; note?: string; baseUrl?: string }) {
+  return post(`/v1/runs/${args.runId}/nodes/${args.nodeId}/deny`, { iteration: args.iteration ?? 0, note: args.note }, args.baseUrl ?? DEFAULT_BASE);
 }
 
 export async function* streamEvents(args: { runId: string; baseUrl?: string }): AsyncIterable<SmithersEvent> {
@@ -61,6 +61,22 @@ export async function getStatus(args: { runId: string; baseUrl?: string }) {
 export async function getFrames(args: { runId: string; tail?: number; baseUrl?: string }) {
   const base = args.baseUrl ?? DEFAULT_BASE;
   const res = await fetch(`${base}/v1/runs/${args.runId}/frames?limit=${args.tail ?? 20}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function cancel(args: { runId: string; baseUrl?: string }) {
+  const base = args.baseUrl ?? DEFAULT_BASE;
+  return post(`/v1/runs/${args.runId}/cancel`, {}, base);
+}
+
+export async function listRuns(args: { limit?: number; status?: string; baseUrl?: string } = {}) {
+  const base = args.baseUrl ?? DEFAULT_BASE;
+  const params = new URLSearchParams();
+  if (args.limit !== undefined) params.set("limit", String(args.limit));
+  if (args.status) params.set("status", args.status);
+  const qs = params.toString();
+  const res = await fetch(`${base}/v1/runs${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

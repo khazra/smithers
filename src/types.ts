@@ -217,6 +217,26 @@ export type SmithersEvent =
       seq: number;
       status: "success" | "error";
       timestampMs: number;
+    }
+  | {
+      type: "RevertStarted";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      jjPointer: string;
+      timestampMs: number;
+    }
+  | {
+      type: "RevertFinished";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      jjPointer: string;
+      success: boolean;
+      error?: string;
+      timestampMs: number;
     };
 
 export type WorkflowProps = {

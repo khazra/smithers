@@ -464,8 +464,121 @@ async function executeTask(
               timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
             }),
         );
-        const output = (result as any).output ?? (result as any).text;
-        payload = typeof output === "string" ? JSON.parse(output) : output;
+        let output: any;
+        
+        // Try structured output first (wrapping in try/catch since getters may throw)
+        try {
+          if ((result as any)._output !== undefined && (result as any)._output !== null) {
+            output = (result as any)._output;
+          } else if ((result as any).output !== undefined && (result as any).output !== null) {
+            output = (result as any).output;
+          }
+        } catch {
+          // Structured output access threw
+        }
+        
+        // Fall back to parsing text/steps for JSON
+        if (output === undefined) {
+          const text = (result as any).text ?? "";
+          
+          // Try to parse the whole text as JSON first
+          try {
+            const trimmed = text.trim();
+            if (trimmed.startsWith("{")) {
+              output = JSON.parse(trimmed);
+            }
+          } catch {
+            // Not valid JSON, try extraction
+          }
+          
+          // Try to extract JSON from code fence (```json ... ```)
+          if (output === undefined) {
+            // Check text first
+            const codeFenceMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+            if (codeFenceMatch) {
+              try {
+                output = JSON.parse(codeFenceMatch[1]);
+              } catch {
+                // Not valid JSON in code fence
+              }
+            }
+            
+            // Check all steps for code fences
+            if (output === undefined) {
+              const steps = (result as any).steps ?? [];
+              for (let i = steps.length - 1; i >= 0; i--) {
+                const stepText = steps[i]?.text ?? "";
+                const stepMatch = stepText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+                if (stepMatch) {
+                  try {
+                    output = JSON.parse(stepMatch[1]);
+                    break;
+                  } catch {
+                    // Not valid JSON
+                  }
+                }
+              }
+            }
+          }
+          
+          // Extract JSON object - use a smarter approach
+          if (output === undefined) {
+            const steps = (result as any).steps ?? [];
+            // Look through steps from end to find valid JSON
+            for (let i = steps.length - 1; i >= 0; i--) {
+              const stepText = steps[i]?.text ?? "";
+              // Try to find and parse JSON object
+              const jsonMatch = stepText.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
+              if (jsonMatch) {
+                for (const candidate of jsonMatch.reverse()) {
+                  try {
+                    const parsed = JSON.parse(candidate);
+                    if (typeof parsed === "object" && parsed !== null) {
+                      output = parsed;
+                      break;
+                    }
+                  } catch {
+                    // Not valid JSON
+                  }
+                }
+                if (output !== undefined) break;
+              }
+            }
+          }
+          
+          // Try text itself
+          if (output === undefined) {
+            const jsonMatch = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
+            if (jsonMatch) {
+              for (const candidate of jsonMatch.reverse()) {
+                try {
+                  const parsed = JSON.parse(candidate);
+                  if (typeof parsed === "object" && parsed !== null) {
+                    output = parsed;
+                    break;
+                  }
+                } catch {
+                  // Not valid JSON
+                }
+              }
+            }
+          }
+          
+          if (output === undefined) {
+            throw new Error("No valid JSON output found in agent response");
+          }
+        }
+        
+        // Output should already be parsed, but handle string case
+        if (typeof output === "string") {
+          try {
+            payload = JSON.parse(output);
+          } catch (e) {
+            throw new Error(`Failed to parse agent output as JSON. Output starts with: "${output.slice(0, 100)}"`);
+          }
+        } else {
+          payload = output;
+        }
       } else {
         payload = desc.staticPayload;
       }

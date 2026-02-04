@@ -1,0 +1,508 @@
+/** @jsxImportSource smithers */
+import { describe, expect, test, afterEach, beforeEach } from "bun:test";
+import type { Server } from "node:http";
+import { startServer } from "../src/server/index";
+import { ensureSmithersTables } from "../src/db/ensure";
+import { createTestDb, sleep } from "./helpers";
+import { ddl, schema } from "./schema";
+import { resolve } from "node:path";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+
+function buildDb() {
+  return createTestDb(schema, ddl);
+}
+
+function getPort(server: Server): number {
+  const addr = server.address() as { port: number };
+  return addr.port;
+}
+
+function makeRequest(port: number) {
+  return async function request(
+    path: string,
+    options: { method?: string; body?: any } = {}
+  ): Promise<{ status: number; data: any }> {
+    const res = await fetch(`http://localhost:${port}${path}`, {
+      method: options.method ?? "GET",
+      headers: options.body ? { "Content-Type": "application/json" } : {},
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    const data = await res.json();
+    return { status: res.status, data };
+  };
+}
+
+describe("HTTP Server", () => {
+  let server: Server;
+  let testDir: string;
+  let port: number;
+  let request: ReturnType<typeof makeRequest>;
+
+  beforeEach(() => {
+    testDir = resolve(process.cwd(), "tests", ".test-workflows-" + Math.random().toString(36).slice(2));
+    mkdirSync(testDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (server) {
+      server.close();
+    }
+    await sleep(100);
+    try {
+      rmSync(testDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  function startTestServer(opts: { db?: any } = {}) {
+    server = startServer({ port: 0, ...opts });
+    port = getPort(server);
+    request = makeRequest(port);
+  }
+
+  function writeTestWorkflow(name: string, dbPath: string, options: { needsApproval?: boolean; slow?: boolean } = {}) {
+    const workflowPath = resolve(testDir, `${name}.tsx`);
+    const slowAgent = options.slow ? `
+const fakeAgent = {
+  id: "fake",
+  tools: {},
+  generate: async () => {
+    await new Promise(r => setTimeout(r, 60000));
+    return { output: { value: 1 } };
+  },
+};` : "";
+    const agentProp = options.slow ? " agent={fakeAgent}" : "";
+    const approvalProp = options.needsApproval ? " needsApproval" : "";
+    
+    writeFileSync(
+      workflowPath,
+      `/** @jsxImportSource smithers */
+import { smithers, Workflow, Task, Sequence } from "smithers";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { Database } from "bun:sqlite";
+import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+
+const input = sqliteTable("input", {
+  runId: text("run_id").primaryKey(),
+  description: text("description"),
+});
+
+const outputA = sqliteTable("output_a", {
+  runId: text("run_id").notNull(),
+  nodeId: text("node_id").notNull(),
+  iteration: integer("iteration").notNull().default(0),
+  value: integer("value"),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
+}));
+
+const schema = { input, outputA };
+const sqlite = new Database("${dbPath}");
+sqlite.exec(\`
+  CREATE TABLE IF NOT EXISTS input (
+    run_id TEXT PRIMARY KEY,
+    description TEXT
+  );
+  CREATE TABLE IF NOT EXISTS output_a (
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    iteration INTEGER NOT NULL DEFAULT 0,
+    value INTEGER,
+    PRIMARY KEY (run_id, node_id, iteration)
+  );
+\`);
+const db = drizzle(sqlite, { schema });
+${slowAgent}
+
+export default smithers(db, (ctx) => (
+  <Workflow name="${name}">
+    <Task id="task1" output={outputA}${agentProp}${approvalProp}>
+      {{ value: 42 }}
+    </Task>
+  </Workflow>
+));
+`
+    );
+    return workflowPath;
+  }
+
+  describe("POST /v1/runs", () => {
+    test("starts a new run and returns runId", async () => {
+      const dbPath = resolve(testDir, "test1.db");
+      const workflowPath = writeTestWorkflow("test1", dbPath);
+      startTestServer();
+
+      const { status, data } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      expect(status).toBe(200);
+      expect(data.runId).toBeDefined();
+      expect(typeof data.runId).toBe("string");
+    });
+
+    test("accepts custom runId", async () => {
+      const dbPath = resolve(testDir, "test2.db");
+      const workflowPath = writeTestWorkflow("test2", dbPath);
+      startTestServer();
+
+      const customRunId = "custom-run-id-123";
+      const { status, data } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath, runId: customRunId },
+      });
+
+      expect(status).toBe(200);
+      expect(data.runId).toBe(customRunId);
+    });
+
+    test("returns 500 for invalid workflow path", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath: "/nonexistent/workflow.ts" },
+      });
+
+      expect(status).toBe(500);
+      expect(data.error).toBeDefined();
+      expect(data.error.code).toBe("SERVER_ERROR");
+    });
+  });
+
+  describe("GET /v1/runs/:runId", () => {
+    test("returns run status after starting", async () => {
+      const dbPath = resolve(testDir, "test3.db");
+      const workflowPath = writeTestWorkflow("test3", dbPath, { slow: true });
+      startTestServer();
+
+      const { status: startStatus, data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      expect(startStatus).toBe(200);
+      await sleep(200);
+
+      const { status, data } = await request(`/v1/runs/${startData.runId}`);
+
+      expect(status).toBe(200);
+      expect(data.runId).toBe(startData.runId);
+      expect(data.workflowName).toBeDefined();
+      expect(data.status).toBeDefined();
+      expect(["running", "finished", "failed", "waiting-approval"]).toContain(data.status);
+    });
+
+    test("returns 404 for non-existent run", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/v1/runs/non-existent-run-id");
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+    });
+  });
+
+  describe("POST /v1/runs/:runId/cancel", () => {
+    test("cancels an active run", async () => {
+      const dbPath = resolve(testDir, "slow.db");
+      const workflowPath = writeTestWorkflow("slow", dbPath, { slow: true });
+      startTestServer();
+
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      await sleep(200);
+
+      const { status, data } = await request(`/v1/runs/${startData.runId}/cancel`, {
+        method: "POST",
+      });
+
+      expect(status).toBe(200);
+      expect(data.runId).toBe(startData.runId);
+    });
+
+    test("returns 404 for non-existent run", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/v1/runs/non-existent-run-id/cancel", {
+        method: "POST",
+      });
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+    });
+  });
+
+  describe("POST /v1/runs/:runId/resume", () => {
+    test("resumes a run with given runId", async () => {
+      const dbPath = resolve(testDir, "resume.db");
+      const workflowPath = writeTestWorkflow("resume", dbPath);
+      startTestServer();
+
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      await sleep(500);
+
+      const { status, data } = await request(`/v1/runs/${startData.runId}/resume`, {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      expect(status).toBe(200);
+      expect(data.runId).toBe(startData.runId);
+    });
+  });
+
+  describe("GET /v1/runs/:runId/frames", () => {
+    test("returns frames for a run", async () => {
+      const dbPath = resolve(testDir, "frames.db");
+      const workflowPath = writeTestWorkflow("frames", dbPath, { slow: true });
+      startTestServer();
+
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      await sleep(200);
+
+      const { status, data } = await request(`/v1/runs/${startData.runId}/frames`);
+
+      expect(status).toBe(200);
+      expect(Array.isArray(data)).toBe(true);
+    });
+
+    test("returns 404 for non-existent run", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/v1/runs/non-existent-run-id/frames");
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+    });
+
+    test("respects limit and afterFrameNo params", async () => {
+      const dbPath = resolve(testDir, "frames2.db");
+      const workflowPath = writeTestWorkflow("frames2", dbPath, { slow: true });
+      startTestServer();
+
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      await sleep(200);
+
+      const { status, data } = await request(
+        `/v1/runs/${startData.runId}/frames?limit=10&afterFrameNo=0`
+      );
+
+      expect(status).toBe(200);
+      expect(Array.isArray(data)).toBe(true);
+    });
+  });
+
+  describe("POST /v1/runs/:runId/nodes/:nodeId/approve", () => {
+    test("approves a node", async () => {
+      const dbPath = resolve(testDir, "approval.db");
+      const workflowPath = writeTestWorkflow("approval", dbPath, { needsApproval: true });
+      startTestServer();
+
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      await sleep(500);
+
+      const { status, data } = await request(
+        `/v1/runs/${startData.runId}/nodes/task1/approve`,
+        {
+          method: "POST",
+          body: { iteration: 0, note: "approved by test", decidedBy: "test-user" },
+        }
+      );
+
+      expect(status).toBe(200);
+      expect(data.runId).toBe(startData.runId);
+    });
+
+    test("returns 404 for non-existent run", async () => {
+      startTestServer();
+
+      const { status, data } = await request(
+        "/v1/runs/non-existent-run-id/nodes/some-node/approve",
+        {
+          method: "POST",
+          body: { iteration: 0 },
+        }
+      );
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+    });
+  });
+
+  describe("POST /v1/runs/:runId/nodes/:nodeId/deny", () => {
+    test("denies a node", async () => {
+      const dbPath = resolve(testDir, "deny.db");
+      const workflowPath = writeTestWorkflow("deny", dbPath, { needsApproval: true });
+      startTestServer();
+
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      await sleep(500);
+
+      const { status, data } = await request(
+        `/v1/runs/${startData.runId}/nodes/task1/deny`,
+        {
+          method: "POST",
+          body: { iteration: 0, note: "denied by test", decidedBy: "test-user" },
+        }
+      );
+
+      expect(status).toBe(200);
+      expect(data.runId).toBe(startData.runId);
+    });
+
+    test("returns 404 for non-existent run", async () => {
+      startTestServer();
+
+      const { status, data } = await request(
+        "/v1/runs/non-existent-run-id/nodes/some-node/deny",
+        {
+          method: "POST",
+          body: { iteration: 0 },
+        }
+      );
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+    });
+  });
+
+  describe("GET /v1/runs/:runId/events (SSE)", () => {
+    test("returns SSE stream for valid run", async () => {
+      const dbPath = resolve(testDir, "events.db");
+      const workflowPath = writeTestWorkflow("events", dbPath, { slow: true });
+      startTestServer();
+
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      await sleep(200);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1000);
+
+      try {
+        const res = await fetch(
+          `http://localhost:${port}/v1/runs/${startData.runId}/events`,
+          { signal: controller.signal }
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toBe("text/event-stream");
+      } catch (e: any) {
+        if (e.name !== "AbortError") throw e;
+      } finally {
+        clearTimeout(timeout);
+        controller.abort();
+      }
+    });
+
+    test("returns 404 for non-existent run", async () => {
+      startTestServer();
+
+      const res = await fetch(
+        `http://localhost:${port}/v1/runs/non-existent-run-id/events`
+      );
+
+      expect(res.status).toBe(404);
+      const data = await res.json() as { error: { code: string } };
+      expect(data.error.code).toBe("NOT_FOUND");
+    });
+  });
+
+  describe("GET /v1/runs (list runs)", () => {
+    test("returns 400 when server DB not configured", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/v1/runs");
+
+      expect(status).toBe(400);
+      expect(data.error.code).toBe("DB_NOT_CONFIGURED");
+    });
+
+    test("returns runs list when server DB is configured", async () => {
+      const { db, cleanup } = buildDb();
+      ensureSmithersTables(db as any);
+      startTestServer({ db: db as any });
+
+      const { status, data } = await request("/v1/runs");
+
+      expect(status).toBe(200);
+      expect(Array.isArray(data)).toBe(true);
+      cleanup();
+    });
+
+    test("respects limit and status params", async () => {
+      const { db, cleanup } = buildDb();
+      ensureSmithersTables(db as any);
+      startTestServer({ db: db as any });
+
+      const { status, data } = await request("/v1/runs?limit=10&status=running");
+
+      expect(status).toBe(200);
+      expect(Array.isArray(data)).toBe(true);
+      cleanup();
+    });
+  });
+
+  describe("404 handling", () => {
+    test("returns 404 for unknown routes", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/v1/unknown-route");
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+      expect(data.error.message).toBe("Route not found");
+    });
+
+    test("returns 404 for root path", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/");
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+    });
+  });
+
+  describe("Error handling", () => {
+    test("returns 500 with error details on server error", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath: "/this/path/does/not/exist.ts" },
+      });
+
+      expect(status).toBe(500);
+      expect(data.error.code).toBe("SERVER_ERROR");
+      expect(data.error.message).toBeDefined();
+    });
+  });
+});
