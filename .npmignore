@@ -1,6 +1,0 @@
-# Test files (must use explicit patterns for npm)
-**/*.test.ts
-**/*.test.tsx
-**/__tests__/
-**/test/
-src/.smithers/
