@@ -1,6 +1,6 @@
 import Reconciler from "react-reconciler";
 import type React from "react";
-import { extractFromHost, type HostNode, type HostElement, type HostText } from "./extract";
+import { extractFromHost, type HostNode, type HostElement, type HostText, type ExtractOptions } from "./extract";
 
 export type HostContainer = {
   root: HostNode | null;
@@ -12,7 +12,9 @@ function createElement(type: string, props: Record<string, any>): HostElement {
   for (const [key, value] of Object.entries(rest)) {
     if (value === undefined || typeof value === "function") continue;
     if (key.startsWith("__")) continue;
-    stringProps[key] = String(value);
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      stringProps[key] = String(value);
+    }
   }
   return { kind: "element", tag: type, props: stringProps, rawProps: props ?? {}, children: [] };
 }
@@ -121,17 +123,15 @@ export class SmithersRenderer {
       null,
       "",
       () => {},
-      () => {},
-      () => {},
       null,
     );
   }
 
-  async render(element: React.ReactElement) {
+  async render(element: React.ReactElement, opts?: ExtractOptions) {
     await new Promise<void>((resolve) => {
       reconciler.updateContainer(element, this.root, null, () => resolve());
     });
-    return extractFromHost(this.container.root);
+    return extractFromHost(this.container.root, opts);
   }
 
   getRoot(): HostNode | null {
