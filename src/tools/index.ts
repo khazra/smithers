@@ -1,4 +1,4 @@
-import { tool } from "ai";
+import { tool, zodSchema } from "ai";
 import { z } from "zod";
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
@@ -32,8 +32,8 @@ async function logToolCall(toolName: string, input: unknown, output: unknown, st
 
 export const read = tool({
   description: "Read a file",
-  parameters: z.object({ path: z.string() }),
-  execute: async ({ path }) => {
+  inputSchema: zodSchema(z.object({ path: z.string() })),
+  execute: async ({ path }: { path: string }) => {
     const ctx = getToolContext();
     const root = ctx?.rootDir ?? process.cwd();
     const resolved = resolveSandboxPath(root, path);
@@ -51,8 +51,8 @@ export const read = tool({
 
 export const write = tool({
   description: "Write a file",
-  parameters: z.object({ path: z.string(), content: z.string() }),
-  execute: async ({ path, content }) => {
+  inputSchema: zodSchema(z.object({ path: z.string(), content: z.string() })),
+  execute: async ({ path, content }: { path: string; content: string }) => {
     const ctx = getToolContext();
     const root = ctx?.rootDir ?? process.cwd();
     const resolved = resolveSandboxPath(root, path);
@@ -71,8 +71,8 @@ export const write = tool({
 
 export const edit = tool({
   description: "Apply a unified diff patch to a file",
-  parameters: z.object({ path: z.string(), patch: z.string() }),
-  execute: async ({ path, patch }) => {
+  inputSchema: zodSchema(z.object({ path: z.string(), patch: z.string() })),
+  execute: async ({ path, patch }: { path: string; patch: string }) => {
     const ctx = getToolContext();
     const root = ctx?.rootDir ?? process.cwd();
     const resolved = resolveSandboxPath(root, path);
@@ -95,8 +95,8 @@ export const edit = tool({
 
 export const grep = tool({
   description: "Search for a pattern in files",
-  parameters: z.object({ pattern: z.string(), path: z.string().optional() }),
-  execute: async ({ pattern, path }) => {
+  inputSchema: zodSchema(z.object({ pattern: z.string(), path: z.string().optional() })),
+  execute: async ({ pattern, path }: { pattern: string; path?: string }) => {
     const ctx = getToolContext();
     const root = ctx?.rootDir ?? process.cwd();
     const resolvedRoot = resolveSandboxPath(root, path ?? ".");
@@ -121,8 +121,14 @@ export const grep = tool({
 
 export const bash = tool({
   description: "Execute a shell command",
-  parameters: z.object({ cmd: z.string(), args: z.array(z.string()).optional(), opts: z.object({ cwd: z.string().optional() }).optional() }),
-  execute: async ({ cmd, args, opts }) => {
+  inputSchema: zodSchema(
+    z.object({
+      cmd: z.string(),
+      args: z.array(z.string()).optional(),
+      opts: z.object({ cwd: z.string().optional() }).optional(),
+    }),
+  ),
+  execute: async ({ cmd, args, opts }: { cmd: string; args?: string[]; opts?: { cwd?: string } }) => {
     const ctx = getToolContext();
     const root = ctx?.rootDir ?? process.cwd();
     const cwd = opts?.cwd ? resolveSandboxPath(root, opts.cwd) : root;
