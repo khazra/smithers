@@ -8,14 +8,14 @@ Define AI workflow graphs with JSX. Deterministic execution with durable state i
 bun add smithers ai @ai-sdk/anthropic drizzle-orm drizzle-zod
 ```
 
-Smithers also requires [JJ (Jujutsu)](https://github.com/martinvonz/jj) for codebase snapshots:
+Smithers optionally integrates with [JJ (Jujutsu)](https://github.com/martinvonz/jj) for codebase snapshots:
 
 ```bash
 brew install jj
 
 ```
 
-or see https://martinvonz.github.io/jj/latest/install/
+or see https://martinvonz.github.io/jj/latest/install/ (if JJ is not installed, pointers are recorded as `null`).
 
 ## Quick Start
 
@@ -120,15 +120,15 @@ Smithers is built on React, but render is pure. Side effects happen only in the 
 
 ### Deterministic Node Identity
 
-Each `<Task>` is assigned a stable NodeId used for resume, caching, and persistence.
+Each `<Task>` must have an explicit `id`. Node identity is deterministic:
 
-NodeId = hash(workflow name + output table name + React path + explicit `id` or React `key`)
+NodeId = `id`
 
 Rules:
 
-- Use `id` on `<Task>` for stable identity across refactors.
-- When rendering arrays, loops, or branches, always provide a React `key`.
-- If the NodeId changes, Smithers treats the node as new and will not reuse old outputs.
+- `id` is required and must be unique per workflow frame.
+- Duplicate ids fail the run deterministically.
+- React `key` is only for React list rendering and does not affect NodeId.
 - `<Ralph>` iterations reuse the same NodeId and are disambiguated by `iteration`.
 
 ### Node States
@@ -243,25 +243,17 @@ If a task unmounts while `in-progress`:
 - Execution is cancelled
 - State set to `cancelled`
 - No output is saved
+- Unmount detection happens on each engine render tick (not mid-attempt)
 
 ### Reverting
 
-If a past node's output changes:
-
-1. Smithers invalidates downstream nodes in the same run
-2. Smithers restores the repo to the JJ pointer recorded for that node attempt
-3. Execution resumes from the changed node
+Smithers records a JJ pointer per attempt when JJ is available. It does not automatically revert or restore the repo.
 
 ---
 
 ## JJ Integration
 
-Smithers records a JJ pointer per attempt to enable time travel. Two modes are supported.
-
-- Change-based (default): store the change id for the working copy at the end of each attempt and restore with `jj edit <change>`.
-- Operation-based: store the operation id and restore with `jj operation restore <op>`.
-
-JJ already snapshots the working copy automatically for most commands, so Smithers does not require manual `jj snapshot`. Configure JJ ignore and snapshot settings to avoid capturing junk files.
+Smithers records the current JJ change id (when JJ is installed) at the end of each attempt. It does not perform restores automatically.
 
 ---
 
@@ -310,6 +302,9 @@ ctx.output(schema.output, { nodeId: "review", iteration: 2 }); // loop iteration
 
 ctx.runId; // current run ID
 ctx.iteration; // current loop iteration (inside <Ralph>)
+ctx.iterations; // per-Ralph iteration map (keyed by Ralph id)
+
+If multiple `<Ralph>` loops exist, use `ctx.iterations[ralphId]`. `ctx.iteration` is only set when a single loop is present.
 ```
 
 Use `ctx.output(...)` for deterministic access to a specific row. Use `ctx.outputs.<table>` when you need to scan or aggregate multiple rows.
@@ -356,17 +351,17 @@ A single task node.
 
 | Prop             | Type      | Description                                     |
 | ---------------- | --------- | ----------------------------------------------- | ---------------------------------------------- |
-| `id`             | `string`  | Stable identity seed for NodeId (optional)      |
+| `id`             | `string`  | Stable identity for this node (required)        |
 | `output`         | `Table`   | Drizzle table from schema (e.g. schema.analyze) |
 | `agent`          | `Agent`   | AI SDK agent (if provided, children → prompt)   |
 | `skipIf`         | `boolean` | Skip if true                                    |
 | `needsApproval`  | `boolean` | Require human approval                          |
-| `timeout`        | `number`  | Max duration in ms before failing               |
+| `timeoutMs`      | `number`  | Max duration in ms before failing               |
 | `retries`        | `number`  | Retry count on failure (default: 0)             |
 | `continueOnFail` | `boolean` | Continue workflow if task fails                 |
 | `children`       | `string   | Output`                                         | Prompt string (with agent) or output (without) |
 
-When rendering arrays or loops, use React `key` on `<Task>` or its wrapper to keep NodeId stable.
+When rendering arrays or loops, use React `key` on `<Task>` or its wrapper for React list stability. NodeId is still derived solely from `id`.
 
 ---
 
@@ -488,14 +483,19 @@ smithers deny workflow.tsx --run-id abc123 --node-id review
 ### Programmatic
 
 ```tsx
-import { compileGraph, runGraph } from "smithers";
-import workflow, { db } from "./workflow";
+import { runWorkflow, renderFrame } from "smithers";
+import workflow from "./workflow";
 
-const graph = compileGraph(workflow, { db });
-
-const results = await runGraph(graph, {
+const results = await runWorkflow(workflow, {
   input: { description: "Fix bugs" },
-  onProgress: (event) => console.log(event.type, event.node),
+  onProgress: (event) => console.log(event.type),
+});
+
+const snapshot = await renderFrame(workflow, {
+  runId: results.runId,
+  iteration: 0,
+  input: { description: "Fix bugs" },
+  outputs: {},
 });
 ```
 
