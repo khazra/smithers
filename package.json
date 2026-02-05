@@ -15,11 +15,15 @@
     "./server": "./src/server/index.ts",
     "./pi-plugin": "./src/pi-plugin/index.ts"
   },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "cli": "bun run src/cli/index.ts",
     "test": "bun test tests/*.test.ts tests/*.test.tsx",
-    "web:build": "bun build apps/desktop/src/webview/main.web.ts --outfile apps/desktop/views/main/main.js --format esm --target browser",
+    "web:build": "bun build apps/web/src/main.web.ts --outfile packages/ui/assets/main.js --format esm --target browser",
     "web:serve": "bun run apps/web/server.ts",
     "web:dev": "bun run web:build && bun run web:serve",
     "e2e": "playwright test"

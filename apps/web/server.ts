@@ -1,13 +1,13 @@
 import { resolve, sep } from "node:path";
-import type { RpcSend } from "../desktop/src/bun/runtime.js";
-import { createAppRuntime } from "../desktop/src/bun/runtime.js";
+import type { RpcSend } from "@smithers/core";
+import { createAppRuntime } from "@smithers/core";
 
 const runtime = createAppRuntime({
   dbPath: process.env.SMITHERS_DB_PATH,
   workspaceRoot: process.env.SMITHERS_WORKSPACE,
 });
 
-const publicDir = resolve(import.meta.dir, "../desktop/views/main");
+const publicDir = resolve(import.meta.dir, "../../packages/ui/assets");
 
 const noopSend: RpcSend = {
   agentEvent: () => {},

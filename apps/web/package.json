@@ -1,0 +1,15 @@
+{
+  "name": "smithers-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run server.ts",
+    "build:ui": "bun build ../../packages/ui/src/web-entry.ts --outfile public/main.js --format esm --target browser"
+  },
+  "dependencies": {
+    "@smithers/core": "workspace:*",
+    "@smithers/shared": "workspace:*",
+    "@smithers/ui": "workspace:*"
+  }
+}
