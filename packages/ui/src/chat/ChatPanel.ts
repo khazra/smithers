@@ -144,22 +144,22 @@ export class ChatPanel extends HTMLElement {
 
         .input-area {
           padding: 0.75rem 1rem 1rem;
-          background: var(--bg, #faf6ee);
+          background: var(--bg, #0B0D10);
           border-top: none;
         }
 
         .input-container {
           display: flex;
           flex-direction: column;
-          border: 1px solid var(--border, #d4c9b5);
+          border: 1px solid var(--border, #1E2736);
           border-radius: 1rem;
-          background: var(--panel, #f5efe3);
+          background: var(--panel, #10141A);
           transition: border-color 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
           overflow: hidden;
         }
 
         .input-container:focus-within {
-          border-color: var(--muted, #6f675a);
+          border-color: var(--muted, #8B96A9);
         }
 
         .input-area textarea {
@@ -173,11 +173,11 @@ export class ChatPanel extends HTMLElement {
           max-height: 8rem;
           font-family: inherit;
           background: transparent;
-          color: var(--text, #1b1a17);
+          color: var(--text, #F5F7FA);
         }
 
         .input-area textarea::placeholder {
-          color: var(--muted, #6f675a);
+          color: var(--muted, #8B96A9);
           opacity: 0.5;
         }
 
@@ -198,8 +198,8 @@ export class ChatPanel extends HTMLElement {
           height: 2rem;
           padding: 0;
           margin: 0;
-          background: var(--text, #1b1a17);
-          color: var(--bg, #faf6ee);
+          background: var(--text, #F5F7FA);
+          color: var(--bg, #0B0D10);
           border: none;
           border-radius: 50%;
           font-size: 1rem;
@@ -230,7 +230,7 @@ export class ChatPanel extends HTMLElement {
           display: inline-block;
           width: 0.5rem;
           height: 0.5rem;
-          background: var(--accent, #f27638);
+          background: var(--accent, #4C7DFF);
           border-radius: 50%;
           animation: champloo-breathe 1.6s ease-in-out infinite;
         }
@@ -241,13 +241,13 @@ export class ChatPanel extends HTMLElement {
         }
 
         pre {
-          background: var(--panel-2, #ece4d4);
-          color: var(--text, #1b1a17);
+          background: var(--panel-2, #161C24);
+          color: var(--text, #F5F7FA);
           padding: 0.75rem;
           border-radius: 0.5rem;
           overflow-x: auto;
           font-size: 0.8125rem;
-          border: 1px solid var(--border, #d4c9b5);
+          border: 1px solid var(--border, #1E2736);
         }
 
         code {
@@ -255,7 +255,7 @@ export class ChatPanel extends HTMLElement {
         }
 
         .workflow-card {
-          border: 1px solid var(--border, #d4c9b5);
+          border: 1px solid var(--border, #1E2736);
           border-radius: 0.75rem;
           padding: 0.75rem;
           background: var(--panel, #f5f5f5);
@@ -277,16 +277,16 @@ export class ChatPanel extends HTMLElement {
 
         .workflow-card__meta {
           font-size: 0.75rem;
-          color: var(--muted, #6f675a);
+          color: var(--muted, #8B96A9);
         }
 
         .workflow-card__status {
           font-size: 0.75rem;
           padding: 0.15rem 0.5rem;
           border-radius: 0.375rem;
-          background: var(--panel-2, #ece4d4);
-          color: var(--text, #1b1a17);
-          border: 1px solid var(--border, #d4c9b5);
+          background: var(--panel-2, #161C24);
+          color: var(--text, #F5F7FA);
+          border: 1px solid var(--border, #1E2736);
           text-transform: uppercase;
           letter-spacing: 0.05em;
         }

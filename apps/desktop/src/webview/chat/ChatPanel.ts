@@ -58,24 +58,24 @@ export class ChatPanel extends HTMLElement {
           flex-direction: column;
           height: 100%;
           font-family: system-ui, -apple-system, sans-serif;
-          color: var(--text, #1b1a17);
-          background: var(--bg, #faf6ee);
+          color: var(--text, #F5F7FA);
+          background: var(--bg, #0B0D10);
         }
 
         .messages {
           flex: 1;
           overflow-y: auto;
-          padding: 0.75rem;
+          padding: 1rem 1.25rem;
           display: flex;
           flex-direction: column;
           gap: 0.75rem;
-          background: var(--bg, #faf6ee);
+          background: var(--bg, #0B0D10);
         }
 
         .message {
           max-width: 80%;
           padding: 0.75rem 1rem;
-          border-radius: 0;
+          border-radius: 1rem;
           line-height: 1.5;
           font-size: 0.875rem;
           transition: opacity 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -83,25 +83,28 @@ export class ChatPanel extends HTMLElement {
 
         .message--user {
           align-self: flex-end;
-          background: var(--text, #1b1a17);
-          color: var(--bg, #faf6ee);
-          border: 1px solid var(--border, #d4c9b5);
+          background: var(--text, #F5F7FA);
+          color: var(--bg, #0B0D10);
+          border: 1px solid var(--border, #1E2736);
+          border-radius: 1.125rem 1.125rem 0.25rem 1.125rem;
         }
 
         .message--assistant {
           align-self: flex-start;
-          background: var(--panel, #f5efe3);
-          color: var(--text, #1b1a17);
-          border: 1px solid var(--border, #d4c9b5);
+          background: var(--panel, #10141A);
+          color: var(--text, #F5F7FA);
+          border: 1px solid var(--border, #1E2736);
+          border-radius: 1.125rem 1.125rem 1.125rem 0.25rem;
         }
 
         .message--toolResult {
           align-self: flex-start;
-          background: var(--panel-2, #ece4d4);
-          color: var(--muted, #6f675a);
+          background: var(--panel-2, #161C24);
+          color: var(--muted, #8B96A9);
           font-family: ui-monospace, monospace;
           font-size: 0.8125rem;
-          border: 1px solid var(--border, #d4c9b5);
+          border: 1px solid var(--border, #1E2736);
+          border-radius: 0.75rem;
         }
 
         .message--workflow {
@@ -112,25 +115,26 @@ export class ChatPanel extends HTMLElement {
 
         .message--error {
           background: transparent;
-          color: var(--danger, #b11226);
-          border: 1px solid var(--danger, #b11226);
+          color: var(--danger, #FF3B5C);
+          border: 1px solid var(--danger, #FF3B5C);
+          border-radius: 0.75rem;
         }
 
         .message__thinking {
-          color: var(--muted, #6f675a);
+          color: var(--muted, #8B96A9);
           font-style: italic;
           font-size: 0.8125rem;
           margin-bottom: 0.5rem;
         }
 
         .message__tool-call {
-          background: var(--panel-2, #ece4d4);
+          background: var(--panel-2, #161C24);
           padding: 0.5rem;
-          border-radius: 0;
+          border-radius: 0.5rem;
           font-family: ui-monospace, monospace;
           font-size: 0.8125rem;
           margin-top: 0.5rem;
-          border: 1px solid var(--border, #d4c9b5);
+          border: 1px solid var(--border, #1E2736);
         }
 
         .messages:empty::after {
@@ -140,81 +144,94 @@ export class ChatPanel extends HTMLElement {
 
         .input-area {
           padding: 0.75rem 1rem 1rem;
-          background: var(--bg, #faf6ee);
-          border-top: 1px solid var(--border, #d4c9b5);
+          background: var(--bg, #0B0D10);
+          border-top: none;
         }
 
         .input-container {
           display: flex;
-          align-items: flex-end;
-          border: 1px solid var(--border, #d4c9b5);
-          background: var(--panel, #f5efe3);
+          flex-direction: column;
+          border: 1px solid var(--border, #1E2736);
+          border-radius: 1rem;
+          background: var(--panel, #10141A);
           transition: border-color 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+          overflow: hidden;
         }
 
         .input-container:focus-within {
-          border-color: var(--info, #2a4a9e);
+          border-color: var(--muted, #8B96A9);
         }
 
         .input-area textarea {
           flex: 1;
-          padding: 0.75rem 0.875rem;
+          padding: 0.875rem 1rem 0.5rem;
           border: none;
-          font-size: 0.8125rem;
+          font-size: 0.875rem;
           line-height: 1.5;
           resize: none;
-          min-height: 2.25rem;
+          min-height: 2.75rem;
           max-height: 8rem;
           font-family: inherit;
           background: transparent;
-          color: var(--text, #1b1a17);
+          color: var(--text, #F5F7FA);
         }
 
         .input-area textarea::placeholder {
-          color: var(--muted, #6f675a);
-          opacity: 0.6;
+          color: var(--muted, #8B96A9);
+          opacity: 0.5;
         }
 
         .input-area textarea:focus {
           outline: none;
         }
 
-        .input-area button {
-          padding: 0.5rem 0.875rem;
-          margin: 0.375rem;
-          background: var(--text, #1b1a17);
-          color: var(--bg, #faf6ee);
-          border: none;
-          font-size: 0.6875rem;
-          cursor: pointer;
-          text-transform: uppercase;
-          letter-spacing: 0.1em;
-          font-weight: 600;
-          font-family: inherit;
-          transition: opacity 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
-          flex-shrink: 0;
-          align-self: flex-end;
+        .input-bottom-row {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          padding: 0.25rem 0.5rem 0.5rem;
+          gap: 0.5rem;
         }
 
-        .input-area button:hover:not(:disabled) {
+        .input-area .send-btn {
+          width: 2rem;
+          height: 2rem;
+          padding: 0;
+          margin: 0;
+          background: var(--text, #F5F7FA);
+          color: var(--bg, #0B0D10);
+          border: none;
+          border-radius: 50%;
+          font-size: 1rem;
+          cursor: pointer;
+          font-family: inherit;
+          transition: opacity 120ms cubic-bezier(0.2, 0.8, 0.2, 1), background 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          line-height: 1;
+        }
+
+        .input-area .send-btn:hover:not(:disabled) {
           opacity: 0.8;
         }
 
-        .input-area button:disabled {
-          opacity: 0.25;
+        .input-area .send-btn:disabled {
+          opacity: 0.15;
           cursor: default;
         }
 
-        .input-area button:active:not(:disabled) {
-          transform: translateY(1px);
+        .input-area .send-btn:active:not(:disabled) {
+          transform: scale(0.92);
         }
 
         .streaming-indicator {
           display: inline-block;
           width: 0.5rem;
           height: 0.5rem;
-          background: #f27638;
-          border-radius: 0;
+          background: var(--accent, #4C7DFF);
+          border-radius: 50%;
           animation: champloo-breathe 1.6s ease-in-out infinite;
         }
 
@@ -224,13 +241,13 @@ export class ChatPanel extends HTMLElement {
         }
 
         pre {
-          background: var(--panel-2, #ece4d4);
-          color: var(--text, #1b1a17);
+          background: var(--panel-2, #161C24);
+          color: var(--text, #F5F7FA);
           padding: 0.75rem;
-          border-radius: 0;
+          border-radius: 0.5rem;
           overflow-x: auto;
           font-size: 0.8125rem;
-          border: 1px solid var(--border, #d4c9b5);
+          border: 1px solid var(--border, #1E2736);
         }
 
         code {
@@ -238,8 +255,8 @@ export class ChatPanel extends HTMLElement {
         }
 
         .workflow-card {
-          border: 1px solid var(--border, #d4c9b5);
-          border-radius: 0;
+          border: 1px solid var(--border, #1E2736);
+          border-radius: 0.75rem;
           padding: 0.75rem;
           background: var(--panel, #f5f5f5);
           color: var(--text, #111);
@@ -260,16 +277,16 @@ export class ChatPanel extends HTMLElement {
 
         .workflow-card__meta {
           font-size: 0.75rem;
-          color: var(--muted, #6f675a);
+          color: var(--muted, #8B96A9);
         }
 
         .workflow-card__status {
           font-size: 0.75rem;
           padding: 0.15rem 0.5rem;
-          border-radius: 0;
-          background: var(--panel-2, #ece4d4);
-          color: var(--text, #1b1a17);
-          border: 1px solid var(--border, #d4c9b5);
+          border-radius: 0.375rem;
+          background: var(--panel-2, #161C24);
+          color: var(--text, #F5F7FA);
+          border: 1px solid var(--border, #1E2736);
           text-transform: uppercase;
           letter-spacing: 0.05em;
         }
@@ -281,10 +298,10 @@ export class ChatPanel extends HTMLElement {
         }
 
         .workflow-card__actions button {
-          background: var(--panel-2, #ece4d4);
+          background: var(--panel-2, #161C24);
           color: var(--text, #111);
-          border: 1px solid var(--border, #d4c9b5);
-          border-radius: 0;
+          border: 1px solid var(--border, #1E2736);
+          border-radius: 0.5rem;
           padding: 0.4rem 0.6rem;
           font-size: 0.75rem;
           cursor: pointer;
@@ -293,24 +310,24 @@ export class ChatPanel extends HTMLElement {
         }
 
         .workflow-card__actions button.primary {
-          background: #f27638;
-          color: #000;
-          border-color: #f27638;
+          background: var(--accent, #4C7DFF);
+          color: var(--white-0, #FFFFFF);
+          border-color: var(--accent, #4C7DFF);
         }
 
         .workflow-card__actions button.danger {
-          background: #b11226;
-          color: #fff;
-          border-color: #b11226;
+          background: var(--danger, #FF3B5C);
+          color: var(--white-0, #FFFFFF);
+          border-color: var(--danger, #FF3B5C);
         }
 
         .workflow-card__approval {
           margin-top: 0.5rem;
           padding: 0.5rem;
-          border-radius: 0;
-          background: var(--panel-2, #ece4d4);
+          border-radius: 0.5rem;
+          background: var(--panel-2, #161C24);
           font-size: 0.75rem;
-          border: 1px solid var(--border, #d4c9b5);
+          border: 1px solid var(--border, #1E2736);
         }
       </style>
 
@@ -318,8 +335,10 @@ export class ChatPanel extends HTMLElement {
 
       <div class="input-area">
         <div class="input-container">
-          <textarea placeholder="Message..." rows="1"></textarea>
-          <button>Send</button>
+          <textarea placeholder="Ask anything, @ to add files, / for commands" rows="1"></textarea>
+          <div class="input-bottom-row">
+            <button class="send-btn" aria-label="Send">↑</button>
+          </div>
         </div>
       </div>
     `;
@@ -327,7 +346,7 @@ export class ChatPanel extends HTMLElement {
     this.messagesEl = this.shadowRoot.querySelector(".messages") as HTMLDivElement;
     this.inputAreaEl = this.shadowRoot.querySelector(".input-area") as HTMLDivElement;
     this.textareaEl = this.shadowRoot.querySelector("textarea") as HTMLTextAreaElement;
-    this.sendBtnEl = this.shadowRoot.querySelector("button") as HTMLButtonElement;
+    this.sendBtnEl = this.shadowRoot.querySelector(".send-btn") as HTMLButtonElement;
   }
 
   private setupEventListeners(): void {
@@ -387,7 +406,7 @@ export class ChatPanel extends HTMLElement {
   private updateInputState(): void {
     this.textareaEl.disabled = this.isStreaming;
     this.sendBtnEl.disabled = !this.inputValue.trim() || this.isStreaming;
-    this.sendBtnEl.textContent = this.isStreaming ? "Stop" : "Send";
+    this.sendBtnEl.textContent = this.isStreaming ? "■" : "↑";
 
     if (this.isStreaming) {
       this.sendBtnEl.onclick = () => this.agent?.abort();
