@@ -18,12 +18,17 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "cli": "bun run src/cli/index.ts",
-    "test": "bun test"
+    "test": "bun test tests/*.test.ts tests/*.test.tsx",
+    "web:build": "bun build apps/desktop/src/webview/main.web.ts --outfile apps/desktop/views/main/main.js --format esm --target browser",
+    "web:serve": "bun run apps/web/server.ts",
+    "web:dev": "bun run web:build && bun run web:serve",
+    "e2e": "playwright test"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/diff": "^5.2.0",
-    "@types/react-reconciler": "^0.28.9"
+    "@types/react-reconciler": "^0.28.9",
+    "@playwright/test": "^1.52.0"
   },
   "peerDependencies": {
     "typescript": "^5"
