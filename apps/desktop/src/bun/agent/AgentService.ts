@@ -1,14 +1,17 @@
 import { randomUUID } from "crypto";
-import type { AgentEvent } from "@mariozechner/pi-ai";
-import type { AgentStreamEventDTO, AttachmentDTO } from "../../shared/rpc";
+import type { AgentEvent, Message } from "@mariozechner/pi-ai";
+import type { AgentSettings, AgentStreamEventDTO, AttachmentDTO } from "../../shared/rpc";
 import { AppDb } from "../db";
 import { ToolRunner } from "../tools";
-import { runAgentTurn } from "./runner";
+import { SecretStore } from "../secrets";
+import { runAgentTurn, type CustomToolRegistry } from "./runner";
 
 export type AgentServiceOptions = {
   db: AppDb;
   workspaceRoot: string;
   emit: (event: AgentStreamEventDTO) => void;
+  secretStore?: SecretStore;
+  toolRegistry?: CustomToolRegistry;
   smithers?: {
     runWorkflow: (params: { workflowPath: string; input: any; attachToSessionId?: string }) => Promise<string>;
   };
@@ -19,6 +22,8 @@ export class AgentService {
   private workspaceRoot: string;
   private emit: (event: AgentStreamEventDTO) => void;
   private smithers?: AgentServiceOptions["smithers"];
+  private secretStore?: SecretStore;
+  private toolRegistry?: CustomToolRegistry;
   private runs = new Map<string, AbortController>();
 
   constructor(opts: AgentServiceOptions) {
@@ -26,6 +31,8 @@ export class AgentService {
     this.workspaceRoot = opts.workspaceRoot;
     this.emit = opts.emit;
     this.smithers = opts.smithers;
+    this.secretStore = opts.secretStore;
+    this.toolRegistry = opts.toolRegistry;
   }
 
   listChatSessions() {
@@ -49,11 +56,20 @@ export class AgentService {
     text: string;
     attachments?: AttachmentDTO[];
   }): Promise<string> {
+    console.log("[AgentService] sendChatMessage called:", { sessionId: params.sessionId, text: params.text });
     const runId = randomUUID();
     const abort = new AbortController();
     this.runs.set(runId, abort);
 
-    const toolRunner = new ToolRunner({ rootDir: this.workspaceRoot });
+    const settings = this.db.getSettings();
+    const allowNetwork = Boolean(settings.smithers?.allowNetwork);
+    const toolRunner = new ToolRunner({ rootDir: this.workspaceRoot, allowNetwork });
+    const history = this.db
+      .listSessionMessages(params.sessionId, 32)
+      .filter((msg) => (msg as any)?.role === "user" || (msg as any)?.role === "assistant") as Message[];
+    const agentSettings = settings.agent as AgentSettings;
+    const openaiKey = this.secretStore ? await this.secretStore.get("openai.apiKey") : null;
+    const anthropicKey = this.secretStore ? await this.secretStore.get("anthropic.apiKey") : null;
 
     try {
       await this.maybeTriggerWorkflow(params.sessionId, params.text);
@@ -65,9 +81,17 @@ export class AgentService {
       text: params.text,
       attachments: params.attachments ?? [],
       toolRunner,
+      history,
+      settings: agentSettings,
+      secrets: {
+        openaiApiKey: openaiKey ?? process.env.OPENAI_API_KEY ?? null,
+        anthropicApiKey: anthropicKey ?? process.env.ANTHROPIC_API_KEY ?? null,
+      },
+      customTools: this.toolRegistry,
       signal: abort.signal,
     });
 
+    console.log("[AgentService] Starting event consumption for runId:", runId);
     void this.consumeEvents({
       sessionId: params.sessionId,
       runId,
@@ -85,6 +109,13 @@ export class AgentService {
     }
   }
 
+  abortAllRuns() {
+    for (const [runId, controller] of this.runs.entries()) {
+      controller.abort();
+      this.runs.delete(runId);
+    }
+  }
+
   private async consumeEvents(opts: {
     sessionId: string;
     runId: string;
@@ -94,8 +125,10 @@ export class AgentService {
     const toolMessageIds = new Map<string, string | null>();
     const toolStarts = new Map<string, { args: any; startedAtMs: number }>();
 
+    console.log("[AgentService] consumeEvents started for runId:", runId);
     try {
       for await (const event of generator) {
+        console.log("[AgentService] Emitting event:", event.type, "for runId:", runId);
         this.emit({ runId, event });
         if (event.type === "message_end") {
           const messageId = this.db.insertMessage({
@@ -147,7 +180,10 @@ export class AgentService {
 
   private async maybeTriggerWorkflow(sessionId: string, text: string) {
     if (!this.smithers) return;
-    const match = text.match(/@workflow\\(([^)]+)\\)/i);
+    const match =
+      text.match(/@workflow\(([^)]+)\)/i) ??
+      text.match(/\brun\s+workflow\s+([^\s]+\.tsx)\b/i) ??
+      text.match(/\brun\s+([^\s]+\.tsx)\b/i);
     if (!match) return;
     const workflowPath = match[1].trim();
     if (!workflowPath) return;

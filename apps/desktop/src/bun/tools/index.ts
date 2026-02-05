@@ -13,6 +13,7 @@ export type ToolRunnerOptions = {
   rootDir: string;
   maxOutputBytes?: number;
   timeoutMs?: number;
+  allowNetwork?: boolean;
 };
 
 const DEFAULT_MAX_OUTPUT = 200_000;
@@ -22,11 +23,13 @@ export class ToolRunner {
   private rootDir: string;
   private maxOutputBytes: number;
   private timeoutMs: number;
+  private allowNetwork: boolean;
 
   constructor(opts: ToolRunnerOptions) {
     this.rootDir = opts.rootDir;
     this.maxOutputBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT;
+    this.allowNetwork = Boolean(opts.allowNetwork);
   }
 
   async read(path: string): Promise<ToolOutput> {
@@ -73,8 +76,8 @@ export class ToolRunner {
   }
 
   async bash(command: string): Promise<ToolOutput> {
-    if (!isCommandSafe(command)) {
-      throw new Error("Network access is disabled for bash commands.");
+    if (!this.allowNetwork && !isCommandSafe(command)) {
+      throw new Error("Network access is disabled for bash commands. Enable allowNetwork to override.");
     }
 
     let stdout = Buffer.alloc(0);
@@ -142,20 +145,123 @@ export class ToolRunner {
 }
 
 function isCommandSafe(command: string): boolean {
-  const lowered = command.toLowerCase();
-  const blocked = [
-    "curl ",
-    "wget ",
-    "http://",
-    "https://",
-    "ssh ",
-    "scp ",
-    "nc ",
+  const tokens = tokenizeCommand(command);
+  if (!tokens.length) return true;
+
+  const blockedExecutables = new Set([
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "sftp",
+    "ftp",
+    "git",
+    "hg",
+    "svn",
+    "nc",
     "netcat",
     "telnet",
-    "ftp ",
-    "sftp ",
-    "git ",
-  ];
-  return !blocked.some((token) => lowered.includes(token));
+    "ping",
+    "traceroute",
+    "dig",
+    "nslookup",
+    "nmap",
+    "openssl",
+    "npm",
+    "pnpm",
+    "yarn",
+    "pip",
+    "pip3",
+    "apt",
+    "apt-get",
+    "brew",
+    "cargo",
+    "go",
+    "gem",
+    "powershell",
+    "pwsh",
+  ]);
+
+  const interpreterExecutables = new Set(["python", "python3", "node", "deno", "ruby", "perl", "php", "bash", "sh"]);
+
+  for (const token of tokens) {
+    const lowered = token.toLowerCase();
+    if (blockedExecutables.has(lowered)) return false;
+    if (looksLikeUrl(lowered) || looksLikeIp(lowered)) return false;
+    if (lowered.startsWith("git@") || lowered.startsWith("ssh://")) return false;
+    if (lowered.includes("--proxy") || lowered.includes("http_proxy") || lowered.includes("https_proxy")) return false;
+  }
+
+  const first = tokens[0]?.toLowerCase();
+  if (first && interpreterExecutables.has(first)) {
+    if (tokens.some((t) => t.toLowerCase().includes("http://") || t.toLowerCase().includes("https://"))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function tokenizeCommand(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escape = false;
+
+  for (const char of input) {
+    if (escape) {
+      current += char;
+      escape = false;
+      continue;
+    }
+    if (char === "\\") {
+      escape = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    if (char === "|" || char === ";" || char === "&") {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function looksLikeUrl(token: string): boolean {
+  return (
+    token.includes("://") ||
+    token.startsWith("www.") ||
+    token.startsWith("http://") ||
+    token.startsWith("https://") ||
+    token.startsWith("ws://") ||
+    token.startsWith("wss://")
+  );
+}
+
+function looksLikeIp(token: string): boolean {
+  return /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(token);
 }

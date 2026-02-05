@@ -16,10 +16,14 @@ export class WorkspaceService {
   private watcher: FSWatcher | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private onChange?: (state: WorkspaceState) => void;
+  private onError?: (error: Error) => void;
 
-  constructor(opts: { root?: string | null; onChange?: (state: WorkspaceState) => void } = {}) {
+  constructor(
+    opts: { root?: string | null; onChange?: (state: WorkspaceState) => void; onError?: (error: Error) => void } = {},
+  ) {
     this.root = opts.root ?? null;
     this.onChange = opts.onChange;
+    this.onError = opts.onError;
   }
 
   getRoot() {
@@ -87,7 +91,7 @@ export class WorkspaceService {
         this.scheduleRefresh();
       });
     } catch {
-      // ignore watcher failures; users can refresh manually
+      this.onError?.(new Error("Workspace file watching is unavailable. Refresh manually to see new workflows."));
     }
   }
 
@@ -100,6 +104,12 @@ export class WorkspaceService {
       }
       this.watcher = null;
     }
+  }
+
+  shutdown() {
+    this.stopWatcher();
+    this.refreshTimer && clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
   }
 
   private emitChange() {

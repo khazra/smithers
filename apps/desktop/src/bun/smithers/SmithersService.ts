@@ -190,6 +190,15 @@ export class SmithersService {
     }
   }
 
+  cancelAllRuns() {
+    for (const handle of this.runHandles.values()) {
+      handle.abort.abort();
+      handle.status = "cancelled";
+      this.db.updateWorkflowRun(handle.runId, { status: "cancelled", finishedAtMs: Date.now() });
+    }
+    this.runHandles.clear();
+  }
+
   async approveNode(runId: string, nodeId: string, iteration = 0, note?: string) {
     const handle = await this.getOrLoadRunHandle(runId);
     if (!handle) throw new Error(`Run not found: ${runId}`);
@@ -217,6 +226,7 @@ export class SmithersService {
       timestampMs: Date.now(),
     };
     this.applyEvent(runId, event);
+    await this.resumeRun(runId);
   }
 
   async getRunOutputs(runId: string): Promise<RunOutputsDTO> {

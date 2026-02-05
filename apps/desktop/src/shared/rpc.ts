@@ -206,14 +206,33 @@ export type RunToolCallsDTO = {
   toolCalls: ToolCallDTO[];
 };
 
+export type AgentSettings = {
+  provider: "openai" | "anthropic";
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+};
+
+export type SmithersSettings = {
+  allowNetwork?: boolean;
+};
+
 export type SettingsDTO = {
   ui: {
     workflowPanel: { isOpen: boolean; width: number };
     artifactsPanelOpen: boolean;
     lastWorkspaceRoot: string | null;
   };
-  agent: Record<string, unknown>;
-  smithers: Record<string, unknown>;
+  agent: AgentSettings;
+  smithers: SmithersSettings;
+};
+
+export type SecretKey = "openai.apiKey" | "anthropic.apiKey";
+
+export type SecretStatusDTO = {
+  openai: boolean;
+  anthropic: boolean;
 };
 
 export type AppRPCType = {
@@ -285,6 +304,9 @@ export type AppRPCType = {
       // settings
       getSettings: { params: {}; response: SettingsDTO };
       setSettings: { params: { patch: Partial<SettingsDTO> }; response: SettingsDTO };
+      getSecretStatus: { params: {}; response: SecretStatusDTO };
+      setSecret: { params: { key: SecretKey; value: string }; response: { ok: true } };
+      clearSecret: { params: { key: SecretKey }; response: { ok: true } };
     };
     messages: {
       agentEvent: AgentStreamEventDTO;

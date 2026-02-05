@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { randomUUID } from "crypto";
 import type {
   AppMessageDTO,
@@ -23,6 +25,14 @@ export class AppDb {
 
   constructor(options: AppDbOptions = {}) {
     const path = options.path ?? "./smithers-desktop.db";
+    const dir = dirname(path);
+    if (dir && dir !== ".") {
+      try {
+        mkdirSync(dir, { recursive: true });
+      } catch {
+        // ignore mkdir errors; Database will throw if path is unusable
+      }
+    }
     this.db = new Database(path);
     this.ensureTables();
   }
@@ -144,6 +154,14 @@ export class AppDb {
         value_json TEXT
       );
     `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS secrets (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+      );
+    `);
   }
 
   createSession(title?: string): string {
@@ -190,6 +208,24 @@ export class AppDb {
 
     const messages = rows.map((row) => JSON.parse(row.content_json) as AppMessageDTO);
     return { ...session, messages };
+  }
+
+  listSessionMessages(sessionId: string, limit = 50): AppMessageDTO[] {
+    const rows = this.db
+      .query(
+        "SELECT content_json FROM chat_messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
+      )
+      .all(sessionId, limit) as { content_json: string }[];
+    const messages = rows
+      .map((row) => {
+        try {
+          return JSON.parse(row.content_json) as AppMessageDTO;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean) as AppMessageDTO[];
+    return messages.reverse();
   }
 
   insertMessage(params: {
@@ -571,6 +607,32 @@ export class AppDb {
     }
     return merged;
   }
+
+  getSecret(key: string): { key: string; value: string } | null {
+    const row = this.db
+      .query("SELECT key, value_json AS value FROM secrets WHERE key = ? LIMIT 1")
+      .get(key) as { key: string; value: string } | null;
+    return row ?? null;
+  }
+
+  setSecret(key: string, value: string) {
+    const now = Date.now();
+    this.db.run(
+      `INSERT INTO secrets (key, value_json, updated_at_ms)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at_ms = excluded.updated_at_ms`,
+      [key, value, now],
+    );
+  }
+
+  deleteSecret(key: string) {
+    this.db.run("DELETE FROM secrets WHERE key = ?", [key]);
+  }
+
+  listSecretKeys(): string[] {
+    const rows = this.db.query("SELECT key FROM secrets").all() as { key: string }[];
+    return rows.map((row) => row.key);
+  }
 }
 
 const DEFAULT_SETTINGS: SettingsDTO = {
@@ -579,8 +641,16 @@ const DEFAULT_SETTINGS: SettingsDTO = {
     artifactsPanelOpen: true,
     lastWorkspaceRoot: null,
   },
-  agent: {},
-  smithers: {},
+  agent: {
+    provider: "openai",
+    model: "gpt-4o-mini",
+    temperature: 0.2,
+    maxTokens: 1024,
+    systemPrompt: "You are Smithers, a pragmatic coding assistant. Be concise and precise.",
+  },
+  smithers: {
+    allowNetwork: false,
+  },
 };
 
 function cloneSettings(settings: SettingsDTO): SettingsDTO {
