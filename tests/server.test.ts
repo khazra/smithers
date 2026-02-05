@@ -1,7 +1,7 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test, afterEach, beforeEach } from "bun:test";
 import type { Server } from "node:http";
-import { startServer } from "../src/server/index";
+import { startServer, type ServerOptions } from "../src/server/index";
 import { ensureSmithersTables } from "../src/db/ensure";
 import { createTestDb, sleep } from "./helpers";
 import { ddl, schema } from "./schema";
@@ -20,11 +20,15 @@ function getPort(server: Server): number {
 function makeRequest(port: number) {
   return async function request(
     path: string,
-    options: { method?: string; body?: any } = {}
+    options: { method?: string; body?: any; headers?: Record<string, string> } = {}
   ): Promise<{ status: number; data: any }> {
+    const headers: Record<string, string> = { ...(options.headers ?? {}) };
+    if (options.body && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
     const res = await fetch(`http://localhost:${port}${path}`, {
       method: options.method ?? "GET",
-      headers: options.body ? { "Content-Type": "application/json" } : {},
+      headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
     const data = await res.json();
@@ -53,7 +57,7 @@ describe("HTTP Server", () => {
     } catch {}
   });
 
-  function startTestServer(opts: { db?: any } = {}) {
+  function startTestServer(opts: ServerOptions = {}) {
     server = startServer({ port: 0, ...opts });
     port = getPort(server);
     request = makeRequest(port);
@@ -168,6 +172,36 @@ export default smithers(db, (ctx) => (
       expect(data.error).toBeDefined();
       expect(data.error.code).toBe("SERVER_ERROR");
     });
+
+    test("returns 400 for invalid JSON body", async () => {
+      const dbPath = resolve(testDir, "test-invalid-json.db");
+      const workflowPath = writeTestWorkflow("test-invalid-json", dbPath);
+      startTestServer();
+
+      const res = await fetch(`http://localhost:${port}/v1/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{",
+      });
+      const data = (await res.json()) as { error: { code: string } };
+      expect(res.status).toBe(400);
+      expect(data.error.code).toBe("INVALID_JSON");
+    });
+
+    test("returns 413 when body exceeds limit", async () => {
+      const dbPath = resolve(testDir, "test-large-body.db");
+      const workflowPath = writeTestWorkflow("test-large-body", dbPath);
+      startTestServer({ maxBodyBytes: 100 });
+
+      const largeInput = { workflowPath, input: { payload: "x".repeat(1000) } };
+      const { status, data } = await request("/v1/runs", {
+        method: "POST",
+        body: largeInput,
+      });
+
+      expect(status).toBe(413);
+      expect(data.error.code).toBe("PAYLOAD_TOO_LARGE");
+    });
   });
 
   describe("GET /v1/runs/:runId", () => {
@@ -200,6 +234,37 @@ export default smithers(db, (ctx) => (
 
       expect(status).toBe(404);
       expect(data.error.code).toBe("NOT_FOUND");
+    });
+  });
+
+  describe("Auth", () => {
+    test("rejects requests without token when auth is enabled", async () => {
+      const dbPath = resolve(testDir, "test-auth.db");
+      const workflowPath = writeTestWorkflow("test-auth", dbPath);
+      startTestServer({ authToken: "secret" });
+
+      const { status, data } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+
+      expect(status).toBe(401);
+      expect(data.error.code).toBe("UNAUTHORIZED");
+    });
+
+    test("accepts requests with valid token", async () => {
+      const dbPath = resolve(testDir, "test-auth-ok.db");
+      const workflowPath = writeTestWorkflow("test-auth-ok", dbPath);
+      startTestServer({ authToken: "secret" });
+
+      const { status, data } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+        headers: { Authorization: "Bearer secret" },
+      });
+
+      expect(status).toBe(200);
+      expect(data.runId).toBeDefined();
     });
   });
 
