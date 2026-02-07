@@ -29,6 +29,14 @@ class WorkspaceState: ObservableObject {
         editorText = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
 
+    func expandFolder(_ item: FileItem) {
+        guard item.needsLoading else { return }
+        let children = FileItem.loadShallowChildren(of: item.id)
+        var updated = fileTree
+        FileItem.replaceChildren(in: &updated, for: item.id, with: children)
+        fileTree = updated
+    }
+
     func openFolderPanel() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false

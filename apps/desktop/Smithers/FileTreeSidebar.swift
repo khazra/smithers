@@ -97,11 +97,17 @@ struct FileTreeRow: View {
                 .truncationMode(.middle)
         }
         .contentShape(Rectangle())
-        .onTapGesture { isExpanded.toggle() }
+        .onTapGesture {
+            if !isExpanded {
+                workspace.expandFolder(item)
+            }
+            isExpanded.toggle()
+        }
         .accessibilityIdentifier("FileTreeItem_\(item.name)")
 
         if isExpanded, let children = item.children {
-            ForEach(children) { child in
+            let visibleChildren = children.filter { !$0.isLazyPlaceholder }
+            ForEach(visibleChildren) { child in
                 FileTreeRow(item: child, workspace: workspace)
                     .padding(.leading, 16)
             }
