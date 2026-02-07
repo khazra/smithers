@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run server.ts",
-    "build:ui": "bun build ../../packages/ui/src/web-entry.ts --outfile public/main.js --format esm --target browser"
+    "build:ui": "cd ../../packages/ui && npx vite build --outDir ../../apps/web/public"
   },
   "dependencies": {
     "@smithers/core": "workspace:*",
