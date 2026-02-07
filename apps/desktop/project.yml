@@ -1,0 +1,43 @@
+name: Smithers
+options:
+  bundleIdPrefix: com.smithers
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+
+packages:
+  STTextView:
+    url: https://github.com/krzyzanowskim/STTextView.git
+    from: "0.9.0"
+
+targets:
+  Smithers:
+    type: application
+    platform: macOS
+    sources:
+      - Smithers
+    dependencies:
+      - package: STTextView
+        product: STTextView
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.smithers.desktop
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.10"
+        CODE_SIGN_STYLE: Automatic
+
+  SmithersUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - SmithersUITests
+    dependencies:
+      - target: Smithers
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.smithers.desktop.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.10"
+        CODE_SIGN_STYLE: Automatic
