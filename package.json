@@ -23,10 +23,8 @@
     "typecheck": "tsc --noEmit",
     "cli": "bun run src/cli/index.ts",
     "test": "bun test tests/*.test.ts tests/*.test.tsx",
-    "web:build": "cd packages/ui && npx vite build",
-    "web:serve": "bun run apps/web/server.ts",
-    "web:dev": "bun run web:build && bun run web:serve",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "dev": "bun run --filter smithers-desktop dev"
   },
   "devDependencies": {
     "@types/bun": "latest",
