@@ -26,6 +26,7 @@ struct TerminalTabBarItem: View {
             subtitle: subtitle,
             icon: "terminal",
             isSelected: isSelected,
+            isModified: false,
             theme: theme,
             onSelect: onSelect,
             onClose: onClose

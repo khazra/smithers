@@ -205,31 +205,31 @@ struct ContentView: View {
                             } else {
                                 emptyEditor
                             }
-                    } else if workspace.isDiffURL(selectedURL) {
-                        if let tab = workspace.diffTab(for: selectedURL) {
-                            DiffViewer(title: tab.title, summary: tab.summary, diff: tab.diff, theme: workspace.theme)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            emptyEditor
-                        }
-                    } else {
-                        if workspace.isNvimModeEnabled {
-                            if let nvimView = workspace.nvimTerminalView {
-                                TerminalTabView(view: nvimView)
+                        } else if workspace.isDiffURL(selectedURL) {
+                            if let tab = workspace.diffTab(for: selectedURL) {
+                                DiffViewer(title: tab.title, summary: tab.summary, diff: tab.diff, theme: workspace.theme)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
-                                nvimPlaceholder
+                                emptyEditor
                             }
                         } else {
-                            CodeEditor(
-                                text: $workspace.editorText,
-                                language: workspace.currentLanguage,
-                                fileURL: workspace.selectedFileURL,
-                                theme: workspace.theme
-                            )
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            if workspace.isNvimModeEnabled {
+                                if let nvimView = workspace.nvimTerminalView {
+                                    TerminalTabView(view: nvimView)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                } else {
+                                    nvimPlaceholder
+                                }
+                            } else {
+                                CodeEditor(
+                                    text: $workspace.editorText,
+                                    language: workspace.currentLanguage,
+                                    fileURL: workspace.selectedFileURL,
+                                    theme: workspace.theme
+                                )
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
                         }
-                    }
                 } else {
                     emptyEditor
                 }
@@ -301,22 +301,24 @@ struct TabBar: View {
                                 isSelected: url == workspace.selectedFileURL,
                                 theme: theme,
                                 onSelect: { workspace.selectFile(url) },
-                                onClose: { workspace.closeFile(url) }
+                                onClose: { workspace.requestCloseFile(url) }
                             )
                         } else {
                             let diffInfo = isDiff ? workspace.diffTab(for: url) : nil
                             let diffSubtitle = diffInfo?.summary.isEmpty == false ? diffInfo?.summary : "Diff view"
+                            let isModified = workspace.isFileModified(url)
                             TabBarItem(
                                 title: isChat ? "Chat" : (diffInfo?.title ?? url.lastPathComponent),
                                 subtitle: isChat ? "Current chat" : (diffSubtitle ?? workspace.displayPath(for: url)),
                                 icon: isChat ? "bubble.left.and.bubble.right" : (isDiff ? "arrow.left.and.right" : iconForFile(url.lastPathComponent)),
                                 isSelected: url == workspace.selectedFileURL,
+                                isModified: isModified,
                                 theme: theme,
                                 onSelect: {
                                     workspace.selectFile(url)
                                 },
                                 onClose: {
-                                    workspace.closeFile(url)
+                                    workspace.requestCloseFile(url)
                                 }
                             )
                         }
@@ -339,7 +341,7 @@ struct TabBar: View {
                 Section("Close") {
                     ForEach(workspace.openFiles, id: \.self) { url in
                         Button(role: .destructive) {
-                            workspace.closeFile(url)
+                            workspace.requestCloseFile(url)
                         } label: {
                             Text("Close \(tabTitle(for: url))")
                         }
@@ -391,11 +393,14 @@ struct TabBarItem: View {
     let subtitle: String
     let icon: String
     let isSelected: Bool
+    let isModified: Bool
     let theme: AppTheme
     let onSelect: () -> Void
     let onClose: () -> Void
 
     var body: some View {
+        let helpText = isModified ? "\(subtitle)\nUnsaved changes" : subtitle
+        let dotColor = isSelected ? theme.tabSelectedForegroundColor : theme.accentColor
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 12))
@@ -405,6 +410,12 @@ struct TabBarItem: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(isSelected ? theme.tabSelectedForegroundColor : theme.tabForegroundColor)
+            if isModified {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 6, height: 6)
+                    .accessibilityLabel("Unsaved changes")
+            }
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
@@ -426,7 +437,7 @@ struct TabBarItem: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onTapGesture(perform: onSelect)
-        .help(subtitle)
+        .help(helpText)
     }
 }
 
