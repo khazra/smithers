@@ -86,6 +86,38 @@ final class SmithersUITests: XCTestCase {
         XCTAssertTrue(value.contains("let x = 42"), "Typed text should appear in editor, got: \(value)")
     }
 
+    func testCommandPaletteOpensFile() throws {
+        let dir = try createTestDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        launchWithDirectory(dir)
+
+        let list = app.outlines["FileTreeList"]
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+
+        openCommandPalette()
+
+        let searchField = app.textFields["CommandPaletteSearchField"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 3), "Search field should be visible")
+        searchField.click()
+        searchField.typeText("main.swift")
+
+        let results = commandPaletteResultsElement()
+        XCTAssertTrue(results.waitForExistence(timeout: 3), "Results list should appear")
+
+        let mainResult = results.staticTexts["src/main.swift"]
+        XCTAssertTrue(mainResult.waitForExistence(timeout: 3), "Should show main.swift in results")
+        mainResult.click()
+
+        let editor = app.scrollViews["CodeEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        let textView = editor.textViews.firstMatch
+
+        let mainPredicate = NSPredicate(format: "value CONTAINS %@", "let x = 42")
+        let mainExpectation = XCTNSPredicateExpectation(predicate: mainPredicate, object: textView)
+        XCTAssertEqual(XCTWaiter.wait(for: [mainExpectation], timeout: 5), .completed, "Editor should open main.swift from command palette")
+    }
+
     func testWindowScreenshot() throws {
         launchApp()
         let window = app.windows.firstMatch
@@ -115,6 +147,18 @@ final class SmithersUITests: XCTestCase {
     private func launchWithDirectory(_ dir: URL) {
         app.launchArguments = ["-openDirectory", dir.path]
         launchApp()
+    }
+
+    private func openCommandPalette() {
+        app.typeKey("p", modifierFlags: [.command])
+    }
+
+    private func commandPaletteResultsElement() -> XCUIElement {
+        let table = app.tables["CommandPaletteResults"]
+        if table.waitForExistence(timeout: 0.5) {
+            return table
+        }
+        return app.outlines["CommandPaletteResults"]
     }
 
     func testSidebarShowsEmptyState() throws {

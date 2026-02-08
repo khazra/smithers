@@ -24,6 +24,12 @@ struct SmithersApp: App {
                 }
                 .keyboardShortcut("O", modifiers: [.command, .shift])
             }
+            CommandGroup(replacing: .printItem) {
+                Button("Go to File...") {
+                    workspace.showCommandPalette()
+                }
+                .keyboardShortcut("P", modifiers: [.command])
+            }
         }
     }
 

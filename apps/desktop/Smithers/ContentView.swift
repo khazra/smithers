@@ -137,26 +137,35 @@ struct ContentView: View {
     @ObservedObject var workspace: WorkspaceState
 
     var body: some View {
-        NavigationSplitView {
-            FileTreeSidebar(workspace: workspace)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 400)
-        } detail: {
-            if workspace.selectedFileURL != nil {
-                CodeEditor(text: $workspace.editorText, language: workspace.currentLanguage, fileURL: workspace.selectedFileURL)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                emptyEditor
-            }
-        }
-        .navigationTitle("")
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                if !workspace.openFiles.isEmpty {
-                    TabBar(workspace: workspace)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        ZStack {
+            NavigationSplitView {
+                FileTreeSidebar(workspace: workspace)
+                    .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 400)
+            } detail: {
+                if workspace.selectedFileURL != nil {
+                    CodeEditor(text: $workspace.editorText, language: workspace.currentLanguage, fileURL: workspace.selectedFileURL)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    emptyEditor
                 }
             }
+            .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if !workspace.openFiles.isEmpty {
+                        TabBar(workspace: workspace)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+
+            if workspace.isCommandPalettePresented {
+                CommandPaletteView(workspace: workspace)
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
+        .animation(.easeInOut(duration: 0.15), value: workspace.isCommandPalettePresented)
     }
 
     private var emptyEditor: some View {
