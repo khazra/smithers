@@ -2,10 +2,15 @@ import SwiftUI
 import Dispatch
 import AppKit
 
+private enum PaletteSelection: Hashable {
+    case file(URL)
+    case folder(URL)
+}
+
 struct CommandPaletteView: View {
     @ObservedObject var workspace: WorkspaceState
     @FocusState private var searchFocused: Bool
-    @State private var selectedURL: URL?
+    @State private var selectedEntry: PaletteSelection?
     @State private var selectedCommandID: String?
 
     var body: some View {
@@ -13,7 +18,7 @@ struct CommandPaletteView: View {
             overlayBackground
             CommandPalettePanel(
                 workspace: workspace,
-                selectedURL: $selectedURL,
+                selectedEntry: $selectedEntry,
                 selectedCommandID: $selectedCommandID,
                 searchFocused: $searchFocused
             )
@@ -35,7 +40,7 @@ struct CommandPaletteView: View {
 
 private struct CommandPalettePanel: View {
     @ObservedObject var workspace: WorkspaceState
-    @Binding var selectedURL: URL?
+    @Binding var selectedEntry: PaletteSelection?
     @Binding var selectedCommandID: String?
     var searchFocused: FocusState<Bool>.Binding
 
@@ -66,23 +71,29 @@ private struct CommandPalettePanel: View {
 
         let panel = decorated
             .onAppear {
-                selectedURL = workspace.fileSearchResults.first?.url
+                selectedEntry = firstAvailableSelection()
                 selectedCommandID = workspace.paletteCommands.first?.id
                 DispatchQueue.main.async {
                     searchFocused.wrappedValue = true
                 }
             }
             .onChange(of: workspace.fileSearchResults) { _, newValue in
-                if let selectedURL, newValue.contains(where: { $0.url == selectedURL }) {
-                    return
-                }
-                selectedURL = newValue.first?.url
+                updateSelectionIfNeeded()
             }
         .onChange(of: workspace.paletteCommands.map(\.id)) { _, newValue in
             if let selectedCommandID, newValue.contains(selectedCommandID) {
                 return
             }
             selectedCommandID = newValue.first
+        }
+        .onChange(of: workspace.recentFileEntries.map(\.url)) { _, _ in
+            updateSelectionIfNeeded()
+        }
+        .onChange(of: workspace.recentFolderEntries.map(\.url)) { _, _ in
+            updateSelectionIfNeeded()
+        }
+        .onChange(of: workspace.fileSearchQuery) { _, _ in
+            updateSelectionIfNeeded()
         }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("CommandPaletteOverlay")
@@ -164,7 +175,13 @@ private struct CommandPalettePanel: View {
 
     @ViewBuilder
     private var fileContent: some View {
-        if workspace.fileSearchResults.isEmpty {
+        let showRecents = shouldShowRecents
+        let recentFiles = workspace.recentFileEntries
+        let recentFolders = workspace.recentFolderEntries
+        let fileResults = workspace.fileSearchResults
+        let hasResults = !fileResults.isEmpty
+        let hasRecents = !recentFiles.isEmpty || !recentFolders.isEmpty
+        if !hasResults && !(showRecents && hasRecents) {
             VStack(spacing: 8) {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 24))
@@ -174,19 +191,76 @@ private struct CommandPalettePanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(selection: $selectedURL) {
-                ForEach(workspace.fileSearchResults) { entry in
-                    HStack(spacing: 8) {
-                        Image(systemName: iconForFile(entry.displayPath))
-                            .foregroundStyle(.secondary)
-                        Text(entry.displayPath)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+            List(selection: $selectedEntry) {
+                if showRecents {
+                    if !recentFiles.isEmpty {
+                        Section("Recent Files") {
+                            ForEach(recentFiles) { entry in
+                                HStack(spacing: 8) {
+                                    Image(systemName: iconForFile(entry.displayPath))
+                                        .foregroundStyle(.secondary)
+                                    Text(entry.displayPath)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                .tag(PaletteSelection.file(entry.url))
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    open(.file(entry.url))
+                                }
+                            }
+                        }
                     }
-                    .tag(entry.url)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        open(entry.url)
+                    if !recentFolders.isEmpty {
+                        Section("Recent Folders") {
+                            ForEach(recentFolders) { entry in
+                                HStack(spacing: 8) {
+                                    Image(systemName: "folder")
+                                        .foregroundStyle(.secondary)
+                                    Text(entry.displayPath)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                .tag(PaletteSelection.folder(entry.url))
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    open(.folder(entry.url))
+                                }
+                            }
+                        }
+                    }
+                    if !fileResults.isEmpty {
+                        Section("Files") {
+                            ForEach(fileResults) { entry in
+                                HStack(spacing: 8) {
+                                    Image(systemName: iconForFile(entry.displayPath))
+                                        .foregroundStyle(.secondary)
+                                    Text(entry.displayPath)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                .tag(PaletteSelection.file(entry.url))
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    open(.file(entry.url))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    ForEach(fileResults) { entry in
+                        HStack(spacing: 8) {
+                            Image(systemName: iconForFile(entry.displayPath))
+                                .foregroundStyle(.secondary)
+                            Text(entry.displayPath)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .tag(PaletteSelection.file(entry.url))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            open(.file(entry.url))
+                        }
                     }
                 }
             }
@@ -208,17 +282,22 @@ private struct CommandPalettePanel: View {
             }
             return
         }
-        if let selectedURL {
-            open(selectedURL)
+        if let selectedEntry {
+            open(selectedEntry)
             return
         }
-        if let first = workspace.fileSearchResults.first?.url {
+        if let first = firstAvailableSelection() {
             open(first)
         }
     }
 
-    private func open(_ url: URL) {
-        workspace.selectFile(url)
+    private func open(_ entry: PaletteSelection) {
+        switch entry {
+        case .file(let url):
+            workspace.selectFile(url)
+        case .folder(let url):
+            workspace.openDirectory(url)
+        }
         workspace.hideCommandPalette()
     }
 

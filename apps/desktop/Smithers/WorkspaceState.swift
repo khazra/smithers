@@ -23,6 +23,12 @@ struct PaletteCommand: Identifiable {
     let action: () -> Void
 }
 
+struct RecentFolderEntry: Identifiable, Hashable {
+    let id: URL
+    let url: URL
+    let displayPath: String
+}
+
 struct DiffTab: Identifiable, Hashable {
     let id: URL
     let title: String
@@ -138,6 +144,8 @@ class WorkspaceState: ObservableObject {
     }
     @Published private(set) var fileSearchResults: [FileIndexEntry] = []
     @Published private(set) var paletteCommands: [PaletteCommand] = []
+    @Published private(set) var recentFileEntries: [FileIndexEntry] = []
+    @Published private(set) var recentFolderEntries: [RecentFolderEntry] = []
     @Published var toastMessage: String?
     private var fileLoadTask: Task<Void, Never>?
     private var fileIndex: [FileIndexEntry] = []
@@ -149,6 +157,8 @@ class WorkspaceState: ObservableObject {
     private var suppressSelectionSync = false
     private var closeGuardsBypassed = false
     private var windowHiddenForNvim = false
+    private var recentFileURLs: [URL] = []
+    private var recentFolderURLs: [URL] = []
     private var toastTask: Task<Void, Never>?
     private var toastToken: Int = 0
     private var autoSaveTask: Task<Void, Never>?
@@ -161,6 +171,9 @@ class WorkspaceState: ObservableObject {
     private static let openFileScheme = "smithers-open-file"
     private static let diffScheme = "smithers-diff"
     private static let lastWorkspaceKey = "smithers.lastWorkspacePath"
+    private static let recentFilesKey = "smithers.recentFiles"
+    private static let recentFoldersKey = "smithers.recentFolders"
+    private static let maxRecentItems = 10
     private static let autoSaveEnabledKey = "smithers.autoSaveEnabled"
     private static let autoSaveIntervalKey = "smithers.autoSaveInterval"
     private static let defaultAutoSaveInterval: TimeInterval = 5
@@ -183,12 +196,19 @@ class WorkspaceState: ObservableObject {
         "dist"
     ]
 
+    init() {
+        recentFileURLs = Self.loadRecentURLs(key: Self.recentFilesKey)
+        recentFolderURLs = Self.loadRecentURLs(key: Self.recentFoldersKey)
+        refreshRecentEntries()
+    }
+
     func openDirectory(_ url: URL) {
         let shouldRestartNvim = isNvimModeEnabled
         stopNvim()
         stopCodexService()
         closeAllTerminals()
         saveLastWorkspace(url)
+        addRecentFolder(url)
         rootDirectory = url
         fileTree = FileItem.loadTree(at: url)
         openFiles = []
@@ -247,6 +267,9 @@ class WorkspaceState: ObservableObject {
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
             return
+        }
+        if isRegularFileURL(url) {
+            addRecentFile(url)
         }
         if isNvimModeEnabled {
             openFileInNvim(url, line: nil, column: nil)
@@ -465,6 +488,17 @@ class WorkspaceState: ObservableObject {
         return "Unsaved files:\n\(listText)\n\n\(actionText)"
     }
 
+    private func formatBufferList(_ names: [String], limit: Int = 6) -> String {
+        guard !names.isEmpty else { return "" }
+        let shown = names.prefix(limit)
+        var text = shown.joined(separator: "\n")
+        let remaining = names.count - shown.count
+        if remaining > 0 {
+            text += "\n...and \(remaining) more"
+        }
+        return text
+    }
+
     private func modifiedNativeFileNames() -> [String] {
         var names: [String] = []
         for url in openFiles where isRegularFileURL(url) {
@@ -484,17 +518,6 @@ class WorkspaceState: ObservableObject {
             output.append(name)
         }
         return output
-    }
-
-    private func formatBufferList(_ names: [String], limit: Int = 6) -> String {
-        guard !names.isEmpty else { return "" }
-        let shown = names.prefix(limit)
-        var text = shown.joined(separator: "\n")
-        let remaining = names.count - shown.count
-        if remaining > 0 {
-            text += "\n...and \(remaining) more"
-        }
-        return text
     }
 
     private func uniqueBufferNames(from buffers: [NvimModifiedBuffer]) -> [String] {
@@ -808,7 +831,7 @@ class WorkspaceState: ObservableObject {
         if let saved = savedFileContents[normalized] ?? savedFileContents[url],
            saved == content {
             if showToast {
-                self.showToast("No changes to save")
+                showToast("No changes to save")
             }
             return
         }
@@ -819,14 +842,22 @@ class WorkspaceState: ObservableObject {
             openFileContents[normalized] = content
             updateWindowTitle()
             if showToast {
-                self.showToast("Saved")
+                showToast("Saved")
             }
         } catch {
             appendErrorMessage("Failed to save \(displayPath(for: normalized)): \(error.localizedDescription)")
             if showToast {
-                self.showToast("Save failed")
+                showToast("Save failed")
             }
         }
+    }
+
+    private func toggleAutoSave() {
+        isAutoSaveEnabled.toggle()
+    }
+
+    private func setAutoSaveInterval(_ interval: TimeInterval) {
+        autoSaveInterval = interval
     }
 
     private func openFileInNvim(_ url: URL, line: Int?, column: Int?) {
@@ -1076,6 +1107,69 @@ class WorkspaceState: ObservableObject {
         UserDefaults.standard.set(url.path, forKey: Self.lastWorkspaceKey)
     }
 
+    private func addRecentFile(_ url: URL) {
+        let normalized = url.standardizedFileURL
+        recentFileURLs.removeAll { $0.standardizedFileURL == normalized }
+        recentFileURLs.insert(normalized, at: 0)
+        if recentFileURLs.count > Self.maxRecentItems {
+            recentFileURLs = Array(recentFileURLs.prefix(Self.maxRecentItems))
+        }
+        persistRecentURLs()
+        refreshRecentEntries()
+    }
+
+    private func addRecentFolder(_ url: URL) {
+        let normalized = url.standardizedFileURL
+        recentFolderURLs.removeAll { $0.standardizedFileURL == normalized }
+        recentFolderURLs.insert(normalized, at: 0)
+        if recentFolderURLs.count > Self.maxRecentItems {
+            recentFolderURLs = Array(recentFolderURLs.prefix(Self.maxRecentItems))
+        }
+        persistRecentURLs()
+        refreshRecentEntries()
+    }
+
+    private func refreshRecentEntries() {
+        recentFileEntries = recentFileURLs.compactMap { url in
+            guard fileExists(at: url, isDirectory: false) else { return nil }
+            let displayPath = recentDisplayPath(for: url)
+            return FileIndexEntry(url: url, displayPath: displayPath)
+        }
+        recentFolderEntries = recentFolderURLs.compactMap { url in
+            guard fileExists(at: url, isDirectory: true) else { return nil }
+            return RecentFolderEntry(id: url, url: url, displayPath: url.path)
+        }
+    }
+
+    private func recentDisplayPath(for url: URL) -> String {
+        guard let rootDirectory else { return url.path }
+        let rootPath = rootDirectory.path
+        let fullPath = url.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : "\(rootPath)/"
+        if fullPath.hasPrefix(prefix) {
+            return String(fullPath.dropFirst(prefix.count))
+        }
+        return fullPath
+    }
+
+    private func fileExists(at url: URL, isDirectory: Bool) -> Bool {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { return false }
+        return isDir.boolValue == isDirectory
+    }
+
+    private func persistRecentURLs() {
+        let filePaths = recentFileURLs.map { $0.path }
+        let folderPaths = recentFolderURLs.map { $0.path }
+        UserDefaults.standard.set(filePaths, forKey: Self.recentFilesKey)
+        UserDefaults.standard.set(folderPaths, forKey: Self.recentFoldersKey)
+    }
+
+    private static func loadRecentURLs(key: String) -> [URL] {
+        guard let paths = UserDefaults.standard.array(forKey: key) as? [String] else { return [] }
+        return paths.map { URL(fileURLWithPath: $0).standardizedFileURL }
+    }
+
     func openFilePanel() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -1209,20 +1303,7 @@ class WorkspaceState: ObservableObject {
         }
     }
 
-    private func toggleAutoSave() {
-        isAutoSaveEnabled.toggle()
-    }
-
-    private func setAutoSaveInterval(_ interval: TimeInterval) {
-        autoSaveInterval = interval
-    }
-
-    private static func formatInterval(_ interval: TimeInterval) -> String {
-        let seconds = Int(interval.rounded())
-        return "\(seconds)s"
-    }
-
-    func showToast(_ message: String, duration: TimeInterval = 2.0) {
+    private func showToast(_ message: String, duration: TimeInterval = 2.0) {
         toastToken += 1
         let token = toastToken
         toastMessage = message
@@ -1234,6 +1315,11 @@ class WorkspaceState: ObservableObject {
                 self.toastMessage = nil
             }
         }
+    }
+
+    private static func formatInterval(_ interval: TimeInterval) -> String {
+        let seconds = Int(interval.rounded())
+        return "\(seconds)s"
     }
 
     func sendChatMessage() {
@@ -1305,7 +1391,7 @@ class WorkspaceState: ObservableObject {
             PaletteCommand(
                 id: "save-all",
                 title: "Save All",
-                icon: "square.and.arrow.down.on.square",
+                icon: "square.and.arrow.down",
                 action: { [weak self] in
                     self?.saveAllFiles()
                 }
@@ -1319,25 +1405,25 @@ class WorkspaceState: ObservableObject {
                 }
             ),
             PaletteCommand(
-                id: "auto-save-5",
+                id: "auto-save-interval-5",
                 title: "Auto Save Interval: 5s",
-                icon: "clock",
+                icon: "timer",
                 action: { [weak self] in
                     self?.setAutoSaveInterval(5)
                 }
             ),
             PaletteCommand(
-                id: "auto-save-10",
+                id: "auto-save-interval-10",
                 title: "Auto Save Interval: 10s",
-                icon: "clock",
+                icon: "timer",
                 action: { [weak self] in
                     self?.setAutoSaveInterval(10)
                 }
             ),
             PaletteCommand(
-                id: "auto-save-30",
+                id: "auto-save-interval-30",
                 title: "Auto Save Interval: 30s",
-                icon: "clock",
+                icon: "timer",
                 action: { [weak self] in
                     self?.setAutoSaveInterval(30)
                 }
