@@ -93,16 +93,23 @@ struct SmithersApp: App {
 
     private func handleLaunchArguments() {
         let args = ProcessInfo.processInfo.arguments
+        var handledDirectory = false
+        var handledFile = false
         if let idx = args.firstIndex(of: "-openDirectory"),
            idx + 1 < args.count {
             let path = args[idx + 1]
             let url = URL(fileURLWithPath: path)
             workspace.openDirectory(url)
+            handledDirectory = true
         }
         if let idx = args.firstIndex(of: "-openFile"),
            idx + 1 < args.count {
             let path = args[idx + 1]
             workspace.selectFile(URL(fileURLWithPath: path))
+            handledFile = true
+        }
+        if !handledDirectory && !handledFile {
+            workspace.restoreLastWorkspaceIfNeeded()
         }
     }
 }

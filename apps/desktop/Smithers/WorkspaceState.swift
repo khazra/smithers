@@ -128,6 +128,7 @@ class WorkspaceState: ObservableObject {
     private static let terminalScheme = "smithers-terminal"
     private static let openFileScheme = "smithers-open-file"
     private static let diffScheme = "smithers-diff"
+    private static let lastWorkspaceKey = "smithers.lastWorkspacePath"
     private var terminalCounter = 0
     private let ghosttyApp = GhosttyApp.shared
     private var nvimController: NvimController?
@@ -151,6 +152,7 @@ class WorkspaceState: ObservableObject {
         stopNvim()
         stopCodexService()
         closeAllTerminals()
+        saveLastWorkspace(url)
         rootDirectory = url
         fileTree = FileItem.loadTree(at: url)
         openFiles = []
@@ -952,6 +954,20 @@ class WorkspaceState: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url {
             openDirectory(url)
         }
+    }
+
+    func restoreLastWorkspaceIfNeeded() {
+        guard rootDirectory == nil else { return }
+        guard let path = UserDefaults.standard.string(forKey: Self.lastWorkspaceKey) else { return }
+        let url = URL(fileURLWithPath: path)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
+              isDir.boolValue else { return }
+        openDirectory(url)
+    }
+
+    private func saveLastWorkspace(_ url: URL) {
+        UserDefaults.standard.set(url.path, forKey: Self.lastWorkspaceKey)
     }
 
     func openFilePanel() {
