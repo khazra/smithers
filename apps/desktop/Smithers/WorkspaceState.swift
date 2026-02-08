@@ -64,7 +64,11 @@ class WorkspaceState: ObservableObject {
     }
     @Published var terminalViews: [URL: GhosttyTerminalView] = [:]
     @Published private(set) var nvimTerminalView: GhosttyTerminalView?
-    @Published private(set) var nvimCurrentFilePath: String?
+    @Published private(set) var nvimCurrentFilePath: String? {
+        didSet {
+            updateWindowTitle()
+        }
+    }
     @Published private(set) var nvimModifiedBuffers: [NvimModifiedBuffer] = [] {
         didSet {
             updateWindowTitle()
@@ -1007,30 +1011,68 @@ class WorkspaceState: ObservableObject {
     }
 
     private func updateWindowTitle() {
-        guard let window = NSApp.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) else { return }
-        let title = buildWindowTitle()
+        guard let window = activeWindow() else { return }
+        let context = buildWindowTitleContext()
+        let title = context.title == "Smithers" ? "Smithers" : "\(context.title) - Smithers"
         if window.title != title {
             window.title = title
         }
+        window.representedURL = context.representedURL
+        window.isDocumentEdited = context.isEdited
+        if let button = window.standardWindowButton(.documentIconButton) {
+            button.isHidden = context.representedURL == nil
+            button.toolTip = context.representedURL?.path
+        }
     }
 
-    private func buildWindowTitle() -> String {
-        guard let selectedFileURL else { return "Smithers" }
-        var title: String
+    private func buildWindowTitleContext() -> (title: String, representedURL: URL?, isEdited: Bool) {
+        guard let selectedFileURL else {
+            return (title: "Smithers", representedURL: nil, isEdited: false)
+        }
+
         if isChatURL(selectedFileURL) {
-            title = "Chat"
-        } else if isTerminalURL(selectedFileURL) {
+            return (title: "Chat", representedURL: nil, isEdited: false)
+        }
+        if isTerminalURL(selectedFileURL) {
             let terminalTitle = terminalViews[selectedFileURL]?.title ?? ""
-            title = terminalTitle.isEmpty ? "Terminal" : terminalTitle
-        } else if isDiffURL(selectedFileURL) {
-            title = diffTabs[selectedFileURL]?.title ?? "Diff"
-        } else {
-            title = displayPath(for: selectedFileURL)
+            let title = terminalTitle.isEmpty ? "Terminal" : terminalTitle
+            return (title: title, representedURL: nil, isEdited: false)
         }
-        if isRegularFileURL(selectedFileURL), isFileModified(selectedFileURL) {
-            title += "*"
+        if isDiffURL(selectedFileURL) {
+            let title = diffTabs[selectedFileURL]?.title ?? "Diff"
+            return (title: title, representedURL: nil, isEdited: false)
         }
-        return "\(title) - Smithers"
+
+        let fileURL = resolvedCurrentFileURL(fallback: selectedFileURL)
+        let title = fileURL.map { displayPath(for: $0) } ?? selectedFileURL.lastPathComponent
+        let edited = fileURL.map { isFileModified($0) } ?? false
+        let suffix = edited ? "*" : ""
+        return (title: "\(title)\(suffix)", representedURL: fileURL, isEdited: edited)
+    }
+
+    private func resolvedCurrentFileURL(fallback: URL) -> URL? {
+        guard isRegularFileURL(fallback) else { return nil }
+        if isNvimModeEnabled, let path = nvimCurrentFilePath, let url = fileURLFromPath(path) {
+            return url.standardizedFileURL
+        }
+        return fallback.standardizedFileURL
+    }
+
+    private func fileURLFromPath(_ path: String) -> URL? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.contains("://") else { return nil }
+        if trimmed.hasPrefix("/") {
+            return URL(fileURLWithPath: trimmed).standardizedFileURL
+        }
+        if let rootDirectory {
+            return URL(fileURLWithPath: trimmed, relativeTo: rootDirectory).standardizedFileURL
+        }
+        return URL(fileURLWithPath: trimmed).standardizedFileURL
+    }
+
+    private func activeWindow() -> NSWindow? {
+        NSApp.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) ?? NSApp.windows.first
     }
 
     func sendChatMessage() {
