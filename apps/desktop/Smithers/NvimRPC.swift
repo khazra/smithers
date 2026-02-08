@@ -3,8 +3,10 @@ import Network
 
 enum MsgPackValue {
     case int(Int64)
+    case double(Double)
     case string(String)
     case array([MsgPackValue])
+    case map([String: MsgPackValue])
     case null
     case bool(Bool)
     case bin(Data)
@@ -25,8 +27,29 @@ extension MsgPackValue {
         return nil
     }
 
+    var doubleValue: Double? {
+        if case let .double(value) = self {
+            return value
+        }
+        return nil
+    }
+
     var arrayValue: [MsgPackValue]? {
         if case let .array(value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var mapValue: [String: MsgPackValue]? {
+        if case let .map(value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var boolValue: Bool? {
+        if case let .bool(value) = self {
             return value
         }
         return nil
@@ -45,10 +68,17 @@ extension MsgPackValue: CustomStringConvertible {
         switch self {
         case let .int(value):
             return "\(value)"
+        case let .double(value):
+            return "\(value)"
         case let .string(value):
             return value
         case let .array(values):
             return "[\(values.map(\.description).joined(separator: ", "))]"
+        case let .map(values):
+            let pairs = values
+                .map { key, value in "\(key): \(value.description)" }
+                .sorted()
+            return "{\(pairs.joined(separator: ", "))}"
         case .null:
             return "nil"
         case let .bool(value):
@@ -74,13 +104,22 @@ private struct MsgPackEncoder {
             data.append(flag ? 0xc3 : 0xc2)
         case let .int(value):
             encodeInt(value, into: &data)
+        case let .double(value):
+            encodeDouble(value, into: &data)
         case let .string(value):
             encodeString(value, into: &data)
         case let .array(values):
             encodeArray(values, into: &data)
+        case let .map(values):
+            encodeMap(values, into: &data)
         case let .bin(bytes):
             encodeBin(bytes, into: &data)
         }
+    }
+
+    private static func encodeDouble(_ value: Double, into data: inout Data) {
+        data.append(0xcb)
+        appendUInt(value.bitPattern, bytes: 8, into: &data)
     }
 
     private static func encodeInt(_ value: Int64, into data: inout Data) {
@@ -146,6 +185,23 @@ private struct MsgPackEncoder {
         }
     }
 
+    private static func encodeMap(_ values: [String: MsgPackValue], into data: inout Data) {
+        let length = values.count
+        if length <= 15 {
+            data.append(0x80 | UInt8(length))
+        } else if length <= UInt16.max {
+            data.append(0xde)
+            appendUInt(UInt64(length), bytes: 2, into: &data)
+        } else {
+            data.append(0xdf)
+            appendUInt(UInt64(length), bytes: 4, into: &data)
+        }
+        for (key, value) in values {
+            encode(.string(key), into: &data)
+            encode(value, into: &data)
+        }
+    }
+
     private static func encodeBin(_ value: Data, into data: inout Data) {
         let length = value.count
         if length <= UInt8.max {
@@ -201,6 +257,10 @@ private struct MsgPackDecoder {
             let bytes = try readBytes(data, index: &index, count: length)
             return .string(String(decoding: bytes, as: UTF8.self))
         }
+        if byte >= 0x80 && byte <= 0x8f {
+            let length = Int(byte & 0x0f)
+            return .map(try decodeMap(data, index: &index, length: length))
+        }
         if byte >= 0x90 && byte <= 0x9f {
             let length = Int(byte & 0x0f)
             return .array(try decodeArray(data, index: &index, length: length))
@@ -213,6 +273,12 @@ private struct MsgPackDecoder {
             return .bool(false)
         case 0xc3:
             return .bool(true)
+        case 0xca:
+            let bits = UInt32(try readUInt(data, index: &index, bytes: 4))
+            return .double(Double(Float(bitPattern: bits)))
+        case 0xcb:
+            let bits = UInt64(try readUInt(data, index: &index, bytes: 8))
+            return .double(Double(bitPattern: bits))
         case 0xcc:
             return .int(Int64(try readUInt(data, index: &index, bytes: 1)))
         case 0xcd:
@@ -241,6 +307,12 @@ private struct MsgPackDecoder {
             let length = Int(try readUInt(data, index: &index, bytes: 4))
             let bytes = try readBytes(data, index: &index, count: length)
             return .string(String(decoding: bytes, as: UTF8.self))
+        case 0xde:
+            let length = Int(try readUInt(data, index: &index, bytes: 2))
+            return .map(try decodeMap(data, index: &index, length: length))
+        case 0xdf:
+            let length = Int(try readUInt(data, index: &index, bytes: 4))
+            return .map(try decodeMap(data, index: &index, length: length))
         case 0xdc:
             let length = Int(try readUInt(data, index: &index, bytes: 2))
             return .array(try decodeArray(data, index: &index, length: length))
@@ -262,6 +334,21 @@ private struct MsgPackDecoder {
         default:
             throw DecodeError.invalidData
         }
+    }
+
+    private mutating func decodeMap(_ data: Data, index: inout Int, length: Int) throws -> [String: MsgPackValue] {
+        var map: [String: MsgPackValue] = [:]
+        map.reserveCapacity(length)
+        for _ in 0..<length {
+            let keyValue = try decodeValue(data, index: &index)
+            let value = try decodeValue(data, index: &index)
+            if let key = keyValue.stringValue {
+                map[key] = value
+            } else {
+                map[keyValue.description] = value
+            }
+        }
+        return map
     }
 
     private mutating func decodeArray(_ data: Data, index: inout Int, length: Int) throws -> [MsgPackValue] {
@@ -395,6 +482,15 @@ final class NvimRPC: @unchecked Sendable {
         let data = MsgPackEncoder.encode(message)
         queue.async {
             connection.send(content: data, completion: .contentProcessed { _ in })
+        }
+    }
+
+    func disconnect() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.connection?.cancel()
+            self.connection = nil
+            self.failAllPending(NvimRPCError.disconnected)
         }
     }
 
