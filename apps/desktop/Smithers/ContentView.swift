@@ -97,6 +97,7 @@ struct CodeEditor: NSViewRepresentable {
                 .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
             ]
             textView.setAttributedString(NSAttributedString(string: text, attributes: attrs))
+            textView.typingAttributes = attrs
             lastAppliedText = text
         }
 
@@ -158,21 +159,30 @@ struct ContentView: View {
                             } else {
                                 emptyEditor
                             }
-                        } else if workspace.isDiffURL(selectedURL) {
-                            if let tab = workspace.diffTab(for: selectedURL) {
-                                DiffViewer(title: tab.title, summary: tab.summary, diff: tab.diff)
+                    } else if workspace.isDiffURL(selectedURL) {
+                        if let tab = workspace.diffTab(for: selectedURL) {
+                            DiffViewer(title: tab.title, summary: tab.summary, diff: tab.diff)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            emptyEditor
+                        }
+                    } else {
+                        if workspace.isNvimModeEnabled {
+                            if let nvimView = workspace.nvimTerminalView {
+                                TerminalTabView(view: nvimView)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
-                                emptyEditor
+                                nvimPlaceholder
                             }
                         } else {
                             CodeEditor(text: $workspace.editorText, language: workspace.currentLanguage, fileURL: workspace.selectedFileURL)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                    } else {
-                        emptyEditor
                     }
+                } else {
+                    emptyEditor
                 }
+            }
             }
             .navigationTitle("")
 
@@ -191,6 +201,18 @@ struct ContentView: View {
                 .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
             Text("Select a file to edit")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: NSColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1)))
+    }
+
+    private var nvimPlaceholder: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Starting Neovim...")
                 .font(.title3)
                 .foregroundStyle(.secondary)
         }

@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct SmithersApp: App {
     @StateObject private var workspace = WorkspaceState()
+    @State private var tmuxKeyHandler: TmuxKeyHandler?
 
     var body: some Scene {
         WindowGroup {
@@ -16,6 +17,9 @@ struct SmithersApp: App {
                     handleLaunchArguments()
                     setInitialWindowSize()
                     configureWindowChrome()
+                    let handler = TmuxKeyHandler(workspace: workspace)
+                    handler.install()
+                    tmuxKeyHandler = handler
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -32,6 +36,10 @@ struct SmithersApp: App {
                     workspace.openTerminal()
                 }
                 .keyboardShortcut("`", modifiers: [.command])
+                Button(workspace.isNvimModeEnabled ? "Disable Neovim Mode" : "Enable Neovim Mode") {
+                    workspace.toggleNvimMode()
+                }
+                .keyboardShortcut("N", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .printItem) {
                 Button("Go to File...") {

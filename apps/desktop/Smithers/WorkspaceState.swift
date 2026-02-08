@@ -32,11 +32,23 @@ struct DiffTab: Identifiable, Hashable {
 
 @MainActor
 class WorkspaceState: ObservableObject {
+    enum NvimModeError: Error, LocalizedError {
+        case missingWorkspace
+
+        var errorDescription: String? {
+            switch self {
+            case .missingWorkspace:
+                return "Open a folder before enabling Neovim mode."
+            }
+        }
+    }
+
     @Published var rootDirectory: URL?
     @Published var fileTree: [FileItem] = []
     @Published var openFiles: [URL] = []
     @Published var selectedFileURL: URL?
     @Published var terminalViews: [URL: GhosttyTerminalView] = [:]
+    @Published private(set) var nvimTerminalView: GhosttyTerminalView?
     @Published var editorText: String = """
     func hello() {
         print("Hello, Smithers!")
@@ -65,6 +77,7 @@ class WorkspaceState: ObservableObject {
     @Published var chatDraft: String = ""
     @Published var isTurnInProgress: Bool = false
     @Published var isCommandPalettePresented: Bool = false
+    @Published var isNvimModeEnabled: Bool = false
     @Published var fileSearchQuery: String = "" {
         didSet {
             scheduleSearch()
@@ -78,6 +91,7 @@ class WorkspaceState: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var openFileContents: [URL: String] = [:]
     private var suppressEditorTextUpdate = false
+    private var suppressSelectionSync = false
     private var turnDiffs: [String: String] = [:]
     private var turnDiffOrder: [String] = []
     private var streamingTurnDiffs: [String: String] = [:]
@@ -87,6 +101,8 @@ class WorkspaceState: ObservableObject {
     private static let diffScheme = "smithers-diff"
     private var terminalCounter = 0
     private let ghosttyApp = GhosttyApp.shared
+    private var nvimController: NvimController?
+    private var nvimStartTask: Task<NvimController, Error>?
     private var codexService: CodexService?
     private var codexEventsTask: Task<Void, Never>?
     nonisolated private static let maxSearchResults = 200
@@ -102,6 +118,8 @@ class WorkspaceState: ObservableObject {
     ]
 
     func openDirectory(_ url: URL) {
+        let shouldRestartNvim = isNvimModeEnabled
+        stopNvim()
         stopCodexService()
         closeAllTerminals()
         rootDirectory = url
@@ -124,9 +142,24 @@ class WorkspaceState: ObservableObject {
         openChat()
         rebuildFileIndex()
         startCodexService(cwd: url.path)
+        if shouldRestartNvim {
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    _ = try await self.ensureNvimStarted()
+                } catch {
+                    self.appendErrorMessage("Neovim failed to start: \(error.localizedDescription)")
+                    self.isNvimModeEnabled = false
+                }
+            }
+        }
     }
 
     func selectFile(_ url: URL) {
+        if suppressSelectionSync {
+            suppressSelectionSync = false
+            return
+        }
         if isChatURL(url) {
             openChat()
             return
@@ -145,6 +178,10 @@ class WorkspaceState: ObservableObject {
         }
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+            return
+        }
+        if isNvimModeEnabled {
+            openFileInNvim(url, line: nil, column: nil)
             return
         }
         if !openFiles.contains(url) {
@@ -174,6 +211,20 @@ class WorkspaceState: ObservableObject {
 
     func closeFile(_ url: URL) {
         guard let index = openFiles.firstIndex(of: url) else { return }
+        if isNvimModeEnabled && isRegularFileURL(url) {
+            let wasSelected = selectedFileURL == url
+            openFiles.remove(at: index)
+            openFileContents.removeValue(forKey: url)
+            if wasSelected {
+                selectedFileURL = nil
+                currentLanguage = nil
+                setEditorText("")
+            }
+            Task { [weak self] in
+                await self?.nvimController?.closeFile(url)
+            }
+            return
+        }
         let wasSelected = selectedFileURL == url
         openFiles.remove(at: index)
         if isTerminalURL(url) {
@@ -197,8 +248,47 @@ class WorkspaceState: ObservableObject {
         selectFile(nextURL)
     }
 
+    func handleNvimBufferEnter(url: URL, select: Bool) {
+        let normalizedURL = url.standardizedFileURL
+        if !openFiles.contains(normalizedURL) {
+            openFiles.append(normalizedURL)
+        }
+        if select {
+            if selectedFileURL != normalizedURL {
+                suppressSelectionSync = true
+                selectedFileURL = normalizedURL
+            }
+            currentLanguage = nil
+            setEditorText("")
+        }
+    }
+
+    func handleNvimBufferDelete(url: URL) {
+        let normalizedURL = url.standardizedFileURL
+        guard let index = openFiles.firstIndex(of: normalizedURL) else { return }
+        openFiles.remove(at: index)
+        openFileContents.removeValue(forKey: normalizedURL)
+        if selectedFileURL == normalizedURL {
+            selectedFileURL = nil
+            currentLanguage = nil
+            setEditorText("")
+        }
+    }
+
+    func toggleNvimMode() {
+        if isNvimModeEnabled {
+            disableNvimMode()
+        } else {
+            enableNvimMode()
+        }
+    }
+
     func isChatURL(_ url: URL) -> Bool {
         url == Self.chatURL
+    }
+
+    func isRegularFileURL(_ url: URL) -> Bool {
+        !isChatURL(url) && !isTerminalURL(url) && !isDiffURL(url)
     }
 
     func isTerminalURL(_ url: URL) -> Bool {
@@ -211,6 +301,122 @@ class WorkspaceState: ObservableObject {
 
     func diffTab(for url: URL) -> DiffTab? {
         diffTabs[url]
+    }
+
+    private func openFileInNvim(_ url: URL, line: Int?, column: Int?) {
+        let normalizedURL = url.standardizedFileURL
+        if !openFiles.contains(normalizedURL) {
+            openFiles.append(normalizedURL)
+        }
+        selectedFileURL = normalizedURL
+        currentLanguage = nil
+        setEditorText("")
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let controller = try await self.ensureNvimStarted()
+                try await controller.openFile(normalizedURL, line: line, column: column)
+            } catch {
+                self.appendErrorMessage("Neovim error: \(error.localizedDescription)")
+                if error is NvimRPCError || error is NvimController.ControllerError {
+                    self.isNvimModeEnabled = false
+                    self.stopNvim()
+                }
+            }
+        }
+    }
+
+    private func enableNvimMode() {
+        if rootDirectory == nil {
+            isNvimModeEnabled = true
+            openFolderPanel()
+            if rootDirectory == nil {
+                isNvimModeEnabled = false
+            }
+            return
+        }
+        isNvimModeEnabled = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.ensureNvimStarted()
+            } catch {
+                self.appendErrorMessage("Neovim failed to start: \(error.localizedDescription)")
+                self.isNvimModeEnabled = false
+                self.stopNvim()
+            }
+        }
+    }
+
+    private func disableNvimMode() {
+        isNvimModeEnabled = false
+        stopNvim()
+        if let selectedFileURL, isRegularFileURL(selectedFileURL) {
+            selectFile(selectedFileURL)
+        }
+    }
+
+    private func ensureNvimStarted() async throws -> NvimController {
+        if let controller = nvimController, nvimStartTask == nil {
+            return controller
+        }
+        if let task = nvimStartTask {
+            return try await task.value
+        }
+
+        let task = Task { [weak self] () throws -> NvimController in
+            guard let self else { throw CancellationError() }
+            guard let rootDirectory = self.rootDirectory else {
+                throw NvimModeError.missingWorkspace
+            }
+
+            guard let nvimPath = NvimController.locateNvimPath() else {
+                throw NvimController.ControllerError.missingNvim
+            }
+            let controller = NvimController(
+                workspace: self,
+                ghosttyApp: self.ghosttyApp,
+                workingDirectory: rootDirectory.path,
+                nvimPath: nvimPath
+            )
+            self.nvimController = controller
+            self.nvimTerminalView = controller.terminalView
+            controller.terminalView.onClose = { [weak self] in
+                Task { @MainActor in
+                    self?.handleNvimTerminalClosed()
+                }
+            }
+            try await controller.start()
+            return controller
+        }
+
+        nvimStartTask = task
+        do {
+            let controller = try await task.value
+            nvimStartTask = nil
+            return controller
+        } catch {
+            nvimStartTask = nil
+            nvimController = nil
+            nvimTerminalView = nil
+            throw error
+        }
+    }
+
+    private func stopNvim() {
+        nvimStartTask?.cancel()
+        nvimStartTask = nil
+        nvimTerminalView?.onClose = nil
+        nvimController?.stop()
+        nvimController = nil
+        nvimTerminalView = nil
+    }
+
+    private func handleNvimTerminalClosed() {
+        guard isNvimModeEnabled else { return }
+        appendErrorMessage("Neovim exited.")
+        isNvimModeEnabled = false
+        stopNvim()
     }
 
     func makeOpenFileURL(path: String, line: Int?, column: Int?) -> URL? {
@@ -234,7 +440,16 @@ class WorkspaceState: ObservableObject {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         guard let pathValue = components.queryItems?.first(where: { $0.name == "path" })?.value else { return false }
         guard let resolved = resolveFileURL(path: pathValue) else { return false }
-        selectFile(resolved)
+        let line = components.queryItems?.first(where: { $0.name == "line" })?.value.flatMap(Int.init)
+        let column = components.queryItems?.first(where: { $0.name == "column" })?.value.flatMap(Int.init)
+        if isNvimModeEnabled {
+            if selectedFileURL != resolved {
+                suppressSelectionSync = true
+            }
+            openFileInNvim(resolved, line: line, column: column)
+        } else {
+            selectFile(resolved)
+        }
         return true
     }
 
@@ -390,6 +605,14 @@ class WorkspaceState: ObservableObject {
 
     private func buildCommandList() -> [PaletteCommand] {
         [
+            PaletteCommand(
+                id: "toggle-nvim",
+                title: isNvimModeEnabled ? "Disable Neovim Mode" : "Enable Neovim Mode",
+                icon: "terminal",
+                action: { [weak self] in
+                    self?.toggleNvimMode()
+                }
+            ),
             PaletteCommand(
                 id: "new-terminal",
                 title: "New Terminal",
