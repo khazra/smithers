@@ -7,6 +7,9 @@ enum CodexEvent: Sendable {
     case commandStarted(itemId: String, command: String, cwd: String)
     case commandOutput(itemId: String, text: String)
     case commandCompleted(itemId: String, exitCode: Int?)
+    case fileChange(turnId: String, item: FileChangeItem)
+    case fileChangeDelta(turnId: String, itemId: String, delta: String)
+    case turnDiffUpdated(turnId: String, diff: String)
     case turnCompleted(status: String)
     case error(message: String)
 }
@@ -152,6 +155,10 @@ final class CodexService: ObservableObject {
             if let params, let decoded = try? params.decode(CommandExecutionOutputDeltaParams.self) {
                 eventContinuation.yield(.commandOutput(itemId: decoded.itemId, text: decoded.delta))
             }
+        case "item/fileChange/outputDelta":
+            if let params, let decoded = try? params.decode(FileChangeOutputDeltaParams.self) {
+                eventContinuation.yield(.fileChangeDelta(turnId: decoded.turnId, itemId: decoded.itemId, delta: decoded.delta))
+            }
         case "item/started":
             if let params, let decoded = try? params.decode(ItemNotificationParams.self) {
                 switch decoded.item {
@@ -168,9 +175,15 @@ final class CodexService: ObservableObject {
                     eventContinuation.yield(.agentMessageCompleted(text: item.text))
                 case .commandExecution(let item):
                     eventContinuation.yield(.commandCompleted(itemId: item.id, exitCode: item.exitCode))
+                case .fileChange(let item):
+                    eventContinuation.yield(.fileChange(turnId: decoded.turnId, item: item))
                 default:
                     break
                 }
+            }
+        case "turn/diff/updated":
+            if let params, let decoded = try? params.decode(TurnDiffUpdatedParams.self) {
+                eventContinuation.yield(.turnDiffUpdated(turnId: decoded.turnId, diff: decoded.diff))
             }
         case "turn/completed":
             if let params, let decoded = try? params.decode(TurnCompletedParams.self) {
@@ -346,6 +359,13 @@ struct CommandExecutionOutputDeltaParams: Decodable {
     let delta: String
 }
 
+struct FileChangeOutputDeltaParams: Decodable {
+    let threadId: String
+    let turnId: String
+    let itemId: String
+    let delta: String
+}
+
 struct ErrorNotificationParams: Decodable {
     let error: TurnErrorInfo
 }
@@ -358,6 +378,12 @@ struct ItemNotificationParams: Decodable {
     let item: ThreadItem
     let threadId: String
     let turnId: String
+}
+
+struct TurnDiffUpdatedParams: Decodable {
+    let threadId: String
+    let turnId: String
+    let diff: String
 }
 
 struct CommandExecutionRequestApprovalResponse: Encodable {
@@ -402,6 +428,7 @@ struct UserInput: Encodable {
 enum ThreadItem: Decodable {
     case agentMessage(AgentMessageItem)
     case commandExecution(CommandExecutionItem)
+    case fileChange(FileChangeItem)
     case other
 
     enum CodingKeys: String, CodingKey {
@@ -411,6 +438,8 @@ enum ThreadItem: Decodable {
         case command
         case cwd
         case exitCode
+        case changes
+        case status
     }
 
     init(from decoder: Decoder) throws {
@@ -427,6 +456,11 @@ enum ThreadItem: Decodable {
             let cwd = try container.decode(String.self, forKey: .cwd)
             let exitCode = try? container.decode(Int.self, forKey: .exitCode)
             self = .commandExecution(CommandExecutionItem(id: id, command: command, cwd: cwd, exitCode: exitCode))
+        case "fileChange":
+            let id = try container.decode(String.self, forKey: .id)
+            let changes = (try? container.decode([FileUpdateChange].self, forKey: .changes)) ?? []
+            let status = (try? container.decode(PatchApplyStatus.self, forKey: .status)) ?? .completed
+            self = .fileChange(FileChangeItem(id: id, changes: changes, status: status))
         default:
             self = .other
         }
@@ -443,4 +477,50 @@ struct CommandExecutionItem: Decodable {
     let command: String
     let cwd: String
     let exitCode: Int?
+}
+
+struct FileChangeItem: Decodable, Hashable, Sendable {
+    let id: String
+    let changes: [FileUpdateChange]
+    let status: PatchApplyStatus
+}
+
+struct FileUpdateChange: Decodable, Hashable, Sendable {
+    let path: String
+    let kind: PatchChangeKind
+    let diff: String
+}
+
+enum PatchApplyStatus: String, Decodable, Hashable, Sendable {
+    case inProgress = "inProgress"
+    case completed
+    case failed
+    case declined
+}
+
+enum PatchChangeKind: Hashable, Sendable, Decodable {
+    case add
+    case delete
+    case update(movePath: String?)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case movePath = "move_path"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = (try? container.decode(String.self, forKey: .type)) ?? ""
+        switch type {
+        case "add":
+            self = .add
+        case "delete":
+            self = .delete
+        case "update":
+            let movePath = try container.decodeIfPresent(String.self, forKey: .movePath)
+            self = .update(movePath: movePath)
+        default:
+            self = .update(movePath: nil)
+        }
+    }
 }

@@ -51,6 +51,9 @@ class WorkspaceState: ObservableObject {
     @Published var chatMessages: [ChatMessage] = [
         ChatMessage(role: .assistant, kind: .text("Chat ready. Ask me anything."))
     ]
+    @Published var activeDiffPreview: DiffPreview?
+    @Published var activeSessionDiff: SessionDiffSnapshot?
+    @Published private(set) var sessionDiffSnapshot: SessionDiffSnapshot?
     @Published var chatDraft: String = ""
     @Published var isTurnInProgress: Bool = false
     @Published var isCommandPalettePresented: Bool = false
@@ -67,8 +70,12 @@ class WorkspaceState: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var openFileContents: [URL: String] = [:]
     private var suppressEditorTextUpdate = false
+    private var turnDiffs: [String: String] = [:]
+    private var turnDiffOrder: [String] = []
+    private var streamingTurnDiffs: [String: String] = [:]
     private static let chatURL = URL(string: "smithers-chat://current")!
     private static let terminalScheme = "smithers-terminal"
+    private static let openFileScheme = "smithers-open-file"
     private var terminalCounter = 0
     private let ghosttyApp = GhosttyApp.shared
     private var codexService: CodexService?
@@ -98,6 +105,12 @@ class WorkspaceState: ObservableObject {
         openFileContents = [:]
         fileIndex = []
         fileSearchResults = []
+        activeDiffPreview = nil
+        activeSessionDiff = nil
+        sessionDiffSnapshot = nil
+        turnDiffs = [:]
+        turnDiffOrder = []
+        streamingTurnDiffs = [:]
         openChat()
         rebuildFileIndex()
         startCodexService(cwd: url.path)
@@ -174,6 +187,61 @@ class WorkspaceState: ObservableObject {
         url.scheme == Self.terminalScheme
     }
 
+    func makeOpenFileURL(path: String, line: Int?, column: Int?) -> URL? {
+        guard let fileURL = resolveFileURL(path: path) else { return nil }
+        var components = URLComponents()
+        components.scheme = Self.openFileScheme
+        components.path = "/open"
+        var items = [URLQueryItem(name: "path", value: fileURL.path)]
+        if let line {
+            items.append(URLQueryItem(name: "line", value: String(line)))
+        }
+        if let column {
+            items.append(URLQueryItem(name: "column", value: String(column)))
+        }
+        components.queryItems = items
+        return components.url
+    }
+
+    func handleOpenURL(_ url: URL) -> Bool {
+        guard url.scheme == Self.openFileScheme else { return false }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        guard let pathValue = components.queryItems?.first(where: { $0.name == "path" })?.value else { return false }
+        guard let resolved = resolveFileURL(path: pathValue) else { return false }
+        selectFile(resolved)
+        return true
+    }
+
+    func closeSelectedTab() {
+        guard let selectedFileURL else { return }
+        closeFile(selectedFileURL)
+    }
+
+    func selectNextTab() {
+        guard !openFiles.isEmpty else { return }
+        if let selectedFileURL, let index = openFiles.firstIndex(of: selectedFileURL) {
+            let nextIndex = (index + 1) % openFiles.count
+            selectFile(openFiles[nextIndex])
+        } else {
+            selectFile(openFiles[0])
+        }
+    }
+
+    func selectPreviousTab() {
+        guard !openFiles.isEmpty else { return }
+        if let selectedFileURL, let index = openFiles.firstIndex(of: selectedFileURL) {
+            let prevIndex = (index - 1 + openFiles.count) % openFiles.count
+            selectFile(openFiles[prevIndex])
+        } else {
+            selectFile(openFiles[0])
+        }
+    }
+
+    func selectTab(index: Int) {
+        guard index >= 0, index < openFiles.count else { return }
+        selectFile(openFiles[index])
+    }
+
     var isCommandMode: Bool {
         fileSearchQuery.hasPrefix(">")
     }
@@ -210,6 +278,19 @@ class WorkspaceState: ObservableObject {
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
             openDirectory(url)
+        }
+    }
+
+    func openFilePanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if let rootDirectory {
+            panel.directoryURL = rootDirectory
+        }
+        if panel.runModal() == .OK, let url = panel.url {
+            selectFile(url)
         }
     }
 
@@ -480,6 +561,12 @@ class WorkspaceState: ObservableObject {
             appendCommandOutput(itemId: itemId, text: text)
         case .commandCompleted(let itemId, let exitCode):
             completeCommand(itemId: itemId, exitCode: exitCode)
+        case .fileChange(let turnId, let item):
+            appendDiffPreview(from: item, turnId: turnId)
+        case .fileChangeDelta(let turnId, _, let delta):
+            appendStreamingDiff(turnId: turnId, delta: delta)
+        case .turnDiffUpdated(let turnId, let diff):
+            updateTurnDiffPreview(turnId: turnId, diff: diff)
         case .turnCompleted(let status):
             isTurnInProgress = false
             finalizeAgentMessage(text: nil)
@@ -546,8 +633,104 @@ class WorkspaceState: ObservableObject {
         chatMessages.append(message)
     }
 
+    private func appendDiffPreview(from item: FileChangeItem, turnId: String) {
+        let preview = DiffPreview.fromFileChange(turnId: turnId, item: item)
+        let trimmed = preview.diff.trimmingCharacters(in: .whitespacesAndNewlines)
+        if turnDiffs[turnId] == nil && !trimmed.isEmpty {
+            ensureTurnOrder(turnId)
+            turnDiffs[turnId] = preview.diff
+            updateSessionDiffSnapshot()
+        }
+        upsertDiffPreview(preview)
+    }
+
+    private func updateTurnDiffPreview(turnId: String, diff: String) {
+        let trimmed = diff.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        ensureTurnOrder(turnId)
+        streamingTurnDiffs[turnId] = nil
+        turnDiffs[turnId] = diff
+        let preview = DiffPreview.fromTurnDiff(turnId: turnId, diff: diff)
+        upsertDiffPreview(preview)
+        updateSessionDiffSnapshot()
+    }
+
+    private func appendStreamingDiff(turnId: String, delta: String) {
+        guard looksLikeUnifiedDiff(delta) else { return }
+        if turnDiffs[turnId] != nil {
+            return
+        }
+        ensureTurnOrder(turnId)
+        let current = streamingTurnDiffs[turnId] ?? ""
+        let updated = current + delta
+        streamingTurnDiffs[turnId] = updated
+        let preview = DiffPreview.fromStreamingDiff(turnId: turnId, diff: updated)
+        upsertDiffPreview(preview)
+        updateSessionDiffSnapshot()
+    }
+
+    private func ensureTurnOrder(_ turnId: String) {
+        if !turnDiffOrder.contains(turnId) {
+            turnDiffOrder.append(turnId)
+        }
+    }
+
+    private func updateSessionDiffSnapshot() {
+        let parts = turnDiffOrder.compactMap { turnDiffs[$0] ?? streamingTurnDiffs[$0] }
+        let combined = parts.joined(separator: "\n\n")
+        let trimmed = combined.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            sessionDiffSnapshot = nil
+            return
+        }
+        let summary = DiffPreview.summarize(diff: combined)
+        sessionDiffSnapshot = SessionDiffSnapshot(
+            files: summary.files,
+            summary: summary.summary,
+            diff: combined
+        )
+    }
+
+    private func upsertDiffPreview(_ preview: DiffPreview) {
+        if let turnId = preview.turnId,
+           let index = chatMessages.lastIndex(where: { message in
+               if case .diffPreview(let existing) = message.kind {
+                   return existing.turnId == turnId
+               }
+               return false
+           }) {
+            var message = chatMessages[index]
+            message.kind = .diffPreview(preview)
+            chatMessages[index] = message
+        } else {
+            let message = ChatMessage(role: .assistant, kind: .diffPreview(preview))
+            chatMessages.append(message)
+        }
+    }
+
     private func appendErrorMessage(_ message: String) {
         chatMessages.append(ChatMessage(role: .assistant, kind: .status(message)))
+    }
+
+    func presentDiff(_ preview: DiffPreview) {
+        activeSessionDiff = nil
+        activeDiffPreview = preview
+    }
+
+    func presentSessionDiff() {
+        guard let snapshot = sessionDiffSnapshot else { return }
+        activeDiffPreview = nil
+        activeSessionDiff = snapshot
+    }
+
+    private func looksLikeUnifiedDiff(_ text: String) -> Bool {
+        if text.contains("diff --git ") || text.contains("\n+++ ") || text.contains("\n--- ") {
+            return true
+        }
+        if text.contains("\n@@ ") || text.hasPrefix("@@") {
+            return true
+        }
+        return false
     }
 
     private func openChat() {
@@ -580,6 +763,20 @@ class WorkspaceState: ObservableObject {
         suppressEditorTextUpdate = false
     }
 
+    private func resolveFileURL(path: String) -> URL? {
+        let expanded = (path as NSString).expandingTildeInPath
+        let fileURL: URL
+        if expanded.hasPrefix("/") {
+            fileURL = URL(fileURLWithPath: expanded)
+        } else if let rootDirectory {
+            fileURL = URL(fileURLWithPath: expanded, relativeTo: rootDirectory).standardizedFileURL
+        } else {
+            return nil
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir), !isDir.boolValue else { return nil }
+        return fileURL
+    }
+
 
 }
-

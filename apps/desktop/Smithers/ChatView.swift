@@ -11,6 +11,7 @@ struct ChatMessage: Identifiable, Hashable {
         case text(String)
         case command(CommandExecutionInfo)
         case status(String)
+        case diffPreview(DiffPreview)
     }
 
     let id: UUID
@@ -53,6 +54,186 @@ struct ChatMessage: Identifiable, Hashable {
     }
 }
 
+struct DiffPreview: Identifiable, Hashable {
+    let id: UUID
+    let turnId: String?
+    let files: [String]
+    let summary: String
+    let previewLines: [String]
+    let diff: String
+    let status: PatchApplyStatus
+
+    var title: String {
+        if files.isEmpty {
+            return "File changes"
+        }
+        if files.count == 1 {
+            return files[0]
+        }
+        return "\(files.count) files changed"
+    }
+
+    var filesText: String {
+        if files.isEmpty {
+            return "No files"
+        }
+        if files.count <= 2 {
+            return files.joined(separator: ", ")
+        }
+        return "\(files[0]), \(files[1]) +\(files.count - 2) more"
+    }
+
+    static func fromFileChange(turnId: String?, item: FileChangeItem) -> DiffPreview {
+        let diff = item.changes.map(\.diff).joined(separator: "\n")
+        let files = DiffPreview.uniquePaths(item.changes.map(\.path))
+        let (added, removed) = DiffPreview.countLineChanges(diff)
+        let summary = "+\(added) -\(removed)"
+        let previewLines = DiffPreview.makePreviewLines(diff, maxLines: 8)
+        return DiffPreview(
+            id: UUID(),
+            turnId: turnId,
+            files: files,
+            summary: summary,
+            previewLines: previewLines,
+            diff: diff,
+            status: item.status
+        )
+    }
+
+    static func fromTurnDiff(turnId: String, diff: String) -> DiffPreview {
+        let summary = DiffPreview.summarize(diff: diff)
+        let previewLines = DiffPreview.makePreviewLines(diff, maxLines: 8)
+        return DiffPreview(
+            id: UUID(),
+            turnId: turnId,
+            files: summary.files,
+            summary: summary.summary,
+            previewLines: previewLines,
+            diff: diff,
+            status: .completed
+        )
+    }
+
+    static func fromStreamingDiff(turnId: String, diff: String) -> DiffPreview {
+        let summary = DiffPreview.summarize(diff: diff)
+        let previewLines = DiffPreview.makePreviewLines(diff, maxLines: 8)
+        return DiffPreview(
+            id: UUID(),
+            turnId: turnId,
+            files: summary.files,
+            summary: summary.summary,
+            previewLines: previewLines,
+            diff: diff,
+            status: .inProgress
+        )
+    }
+
+    static func summarize(diff: String) -> (files: [String], summary: String) {
+        let files = DiffPreview.uniquePaths(DiffPreview.parsePathsFromUnifiedDiff(diff))
+        let (added, removed) = DiffPreview.countLineChanges(diff)
+        let summary = "+\(added) -\(removed)"
+        return (files, summary)
+    }
+
+    private static func countLineChanges(_ diff: String) -> (added: Int, removed: Int) {
+        var added = 0
+        var removed = 0
+        for line in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("+") && !line.hasPrefix("+++") {
+                added += 1
+            } else if line.hasPrefix("-") && !line.hasPrefix("---") {
+                removed += 1
+            }
+        }
+        return (added, removed)
+    }
+
+    private static func uniquePaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        ordered.reserveCapacity(paths.count)
+        for path in paths {
+            if seen.insert(path).inserted {
+                ordered.append(path)
+            }
+        }
+        return ordered
+    }
+
+    private static func parsePathsFromUnifiedDiff(_ diff: String) -> [String] {
+        var paths: [String] = []
+        for rawLine in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+            guard rawLine.hasPrefix("diff --git ") else { continue }
+            let rest = rawLine.dropFirst("diff --git ".count)
+            let tokens = readDiffTokens(String(rest), maxTokens: 2)
+            guard tokens.count >= 2 else { continue }
+            if let path = normalizeDiffPath(tokens[1]) {
+                paths.append(path)
+            }
+        }
+        return paths
+    }
+
+    private static func readDiffTokens(_ line: String, maxTokens: Int) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var isQuoted = false
+        var escapeNext = false
+
+        for ch in line {
+            if escapeNext {
+                current.append(ch)
+                escapeNext = false
+                continue
+            }
+            if ch == "\\" {
+                escapeNext = true
+                continue
+            }
+            if ch == "\"" {
+                isQuoted.toggle()
+                continue
+            }
+            if ch == " " && !isQuoted {
+                if !current.isEmpty {
+                    tokens.append(current)
+                    current = ""
+                    if tokens.count == maxTokens {
+                        break
+                    }
+                }
+                continue
+            }
+            current.append(ch)
+        }
+
+        if !current.isEmpty && tokens.count < maxTokens {
+            tokens.append(current)
+        }
+
+        return tokens
+    }
+
+    private static func normalizeDiffPath(_ token: String) -> String? {
+        let trimmed = token.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        if trimmed.hasPrefix("b/") {
+            return String(trimmed.dropFirst(2))
+        }
+        if trimmed.hasPrefix("a/") {
+            return String(trimmed.dropFirst(2))
+        }
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func makePreviewLines(_ diff: String, maxLines: Int) -> [String] {
+        let lines = diff.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if lines.isEmpty {
+            return ["(No diff available)"]
+        }
+        return Array(lines.prefix(maxLines))
+    }
+}
+
 struct CommandExecutionInfo: Hashable {
     let itemId: String
     var command: String
@@ -60,6 +241,17 @@ struct CommandExecutionInfo: Hashable {
     var output: String
     var exitCode: Int?
     var status: CommandExecutionStatus
+}
+
+struct SessionDiffSnapshot: Identifiable, Hashable {
+    let id: String = "session-diff"
+    let files: [String]
+    let summary: String
+    let diff: String
+
+    var title: String {
+        "Session Diff"
+    }
 }
 
 enum CommandExecutionStatus: Hashable {
@@ -77,7 +269,7 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(workspace.chatMessages) { message in
-                            ChatBubble(message: message)
+                            ChatBubble(message: message, workspace: workspace)
                                 .id(message.id)
                         }
                         if workspace.isTurnInProgress {
@@ -119,6 +311,14 @@ struct ChatView: View {
                     .controlSize(.small)
                 }
 
+                if workspace.sessionDiffSnapshot != nil {
+                    Button("Session Diff") {
+                        workspace.presentSessionDiff()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
                 Button("Send") {
                     workspace.sendChatMessage()
                 }
@@ -133,11 +333,18 @@ struct ChatView: View {
                 inputFocused = true
             }
         }
+        .sheet(item: $workspace.activeDiffPreview) { preview in
+            DiffViewer(title: preview.title, summary: preview.summary, diff: preview.diff)
+        }
+        .sheet(item: $workspace.activeSessionDiff) { snapshot in
+            DiffViewer(title: snapshot.title, summary: snapshot.summary, diff: snapshot.diff)
+        }
     }
 }
 
 struct ChatBubble: View {
     let message: ChatMessage
+    @ObservedObject var workspace: WorkspaceState
 
     var body: some View {
         HStack {
@@ -167,6 +374,8 @@ struct ChatBubble: View {
             return Color.black.opacity(0.35)
         case .status:
             return Color.white.opacity(0.05)
+        case .diffPreview:
+            return Color.white.opacity(0.07)
         case .text:
             switch message.role {
             case .assistant:
@@ -181,28 +390,47 @@ struct ChatBubble: View {
     private var bubbleContent: some View {
         switch message.kind {
         case .text(let text):
-            Text(message.isStreaming ? text + " ..." : text)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(.primary)
+            LinkifiedText(
+                workspace: workspace,
+                text: message.isStreaming ? text + " ..." : text,
+                font: .system(size: 13, weight: .regular),
+                baseColor: .primary,
+                selectionEnabled: true
+            )
         case .status(let text):
-            Text(text)
-                .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(.secondary)
+            LinkifiedText(
+                workspace: workspace,
+                text: text,
+                font: .system(size: 12, weight: .regular),
+                baseColor: .secondary,
+                selectionEnabled: true
+            )
         case .command(let info):
             VStack(alignment: .leading, spacing: 6) {
-                Text("$ \(info.command)")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.primary)
+                LinkifiedText(
+                    workspace: workspace,
+                    text: "$ \(info.command)",
+                    font: .system(size: 12, weight: .medium, design: .monospaced),
+                    baseColor: .primary,
+                    selectionEnabled: true
+                )
                 if !info.cwd.isEmpty {
-                    Text("cwd: \(info.cwd)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    LinkifiedText(
+                        workspace: workspace,
+                        text: "cwd: \(info.cwd)",
+                        font: .system(size: 11),
+                        baseColor: .secondary,
+                        selectionEnabled: true
+                    )
                 }
                 if !info.output.isEmpty {
-                    Text(info.output)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
+                    LinkifiedText(
+                        workspace: workspace,
+                        text: info.output,
+                        font: .system(size: 12, weight: .regular, design: .monospaced),
+                        baseColor: .primary,
+                        selectionEnabled: true
+                    )
                 }
                 if let exitCode = info.exitCode {
                     Text("exit \(exitCode)")
@@ -214,6 +442,148 @@ struct ChatBubble: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        case .diffPreview(let preview):
+            DiffPreviewCard(preview: preview) {
+                workspace.presentDiff(preview)
+            }
+        }
+    }
+}
+
+struct DiffPreviewCard: View {
+    let preview: DiffPreview
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(preview.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    DiffStatusBadge(status: preview.status)
+                }
+                Text(preview.filesText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(preview.summary)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                DiffSnippetView(lines: preview.previewLines)
+                Text("Click to view full diff")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct DiffSnippetView: View {
+    let lines: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                DiffLineRow(line: line, fontSize: 11)
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.black.opacity(0.2))
+        )
+    }
+}
+
+struct DiffLineRow: View {
+    let line: String
+    let fontSize: CGFloat
+    let allowWrapping: Bool
+
+    init(line: String, fontSize: CGFloat, allowWrapping: Bool = true) {
+        self.line = line
+        self.fontSize = fontSize
+        self.allowWrapping = allowWrapping
+    }
+
+    var body: some View {
+        let text = Text(line.isEmpty ? " " : line)
+            .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+            .foregroundStyle(colorForLine(line))
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        if allowWrapping {
+            text
+        } else {
+            text.fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private func colorForLine(_ line: String) -> Color {
+        if line.hasPrefix("+++ ") || line.hasPrefix("--- ") {
+            return Color.secondary
+        }
+        if line.hasPrefix("+") {
+            return Color.green.opacity(0.9)
+        }
+        if line.hasPrefix("-") {
+            return Color.red.opacity(0.9)
+        }
+        if line.hasPrefix("@@") {
+            return Color.purple.opacity(0.9)
+        }
+        if line.hasPrefix("diff --git") || line.hasPrefix("index ") {
+            return Color.secondary
+        }
+        return Color.primary
+    }
+}
+
+struct DiffStatusBadge: View {
+    let status: PatchApplyStatus
+
+    var body: some View {
+        Text(statusText)
+            .font(.system(size: 9, weight: .semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(statusColor.opacity(0.2))
+            )
+            .foregroundStyle(statusColor)
+    }
+
+    private var statusText: String {
+        switch status {
+        case .completed:
+            return "Applied"
+        case .failed:
+            return "Failed"
+        case .declined:
+            return "Declined"
+        case .inProgress:
+            return "Applying"
+        }
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .completed:
+            return Color.green
+        case .failed:
+            return Color.red
+        case .declined:
+            return Color.orange
+        case .inProgress:
+            return Color.blue
         }
     }
 }
