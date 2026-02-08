@@ -4,6 +4,7 @@ struct DiffViewer: View {
     let title: String
     let summary: String?
     let diff: String
+    let theme: AppTheme
     let document: DiffDocument
     let onOpenInTab: (() -> Void)?
 
@@ -14,16 +15,18 @@ struct DiffViewer: View {
     @State private var hunkIndex: Int = 0
     @State private var scrollTarget: String?
 
-    init(title: String, summary: String?, diff: String, onOpenInTab: (() -> Void)? = nil) {
+    init(title: String, summary: String?, diff: String, theme: AppTheme, onOpenInTab: (() -> Void)? = nil) {
         self.title = title
         self.summary = summary
         self.diff = diff
+        self.theme = theme
         self.onOpenInTab = onOpenInTab
         self.document = DiffParser.parse(diff)
         _selectedFileId = State(initialValue: document.files.first?.id)
     }
 
     var body: some View {
+        let diffTheme = DiffTheme(appTheme: theme)
         VStack(spacing: 0) {
             DiffViewerHeader(
                 title: title,
@@ -41,6 +44,7 @@ struct DiffViewer: View {
             )
 
             Divider()
+                .background(diffTheme.divider)
 
             HStack(spacing: 0) {
                 DiffFileListView(
@@ -50,6 +54,7 @@ struct DiffViewer: View {
                 .frame(width: 240)
 
                 Divider()
+                    .background(diffTheme.divider)
 
                 DiffContentView(
                     document: document,
@@ -61,6 +66,8 @@ struct DiffViewer: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
+        .background(diffTheme.canvasBackground)
+        .environment(\.diffTheme, diffTheme)
     }
 
     private var hunkAnchors: [HunkAnchor] {
@@ -100,15 +107,17 @@ private struct DiffViewerHeader: View {
     let onJumpNext: () -> Void
     let onOpenInTab: (() -> Void)?
     let onClose: () -> Void
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(diffTheme.primaryText)
                 Text(summary)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(diffTheme.mutedText)
             }
 
             Spacer()
@@ -134,7 +143,7 @@ private struct DiffViewerHeader: View {
 
                 Text(hunkState.label)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(diffTheme.mutedText)
                     .frame(minWidth: 56, alignment: .center)
             }
 
@@ -168,13 +177,14 @@ private struct DiffViewerHeader: View {
             .controlSize(.small)
         }
         .padding(12)
-        .background(DiffTheme.headerBackground)
+        .background(diffTheme.headerBackground)
     }
 }
 
 private struct DiffFileListView: View {
     let files: [DiffFile]
     @Binding var selectedFileId: String?
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         ScrollView {
@@ -190,13 +200,14 @@ private struct DiffFileListView: View {
             }
             .padding(10)
         }
-        .background(DiffTheme.sidebarBackground)
+        .background(diffTheme.sidebarBackground)
     }
 }
 
 private struct DiffFileRow: View {
     let file: DiffFile
     let isSelected: Bool
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         HStack(spacing: 8) {
@@ -212,15 +223,16 @@ private struct DiffFileRow: View {
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .foregroundStyle(diffTheme.primaryText)
                 Text(file.summaryText)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(diffTheme.mutedText)
             }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .background(isSelected ? DiffTheme.sidebarSelection : Color.clear)
+        .background(isSelected ? diffTheme.sidebarSelection : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
@@ -231,6 +243,7 @@ private struct DiffContentView: View {
     let wrapLines: Bool
     let compactMode: Bool
     @Binding var scrollTarget: String?
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         GeometryReader { geometry in
@@ -250,7 +263,7 @@ private struct DiffContentView: View {
                     }
                     .padding(.bottom, 24)
                 }
-                .background(DiffTheme.canvasBackground)
+                .background(diffTheme.canvasBackground)
                 .onChange(of: selectedFileId) { _, newValue in
                     guard let newValue else { return }
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -273,6 +286,7 @@ private struct DiffFileSection: View {
     let wrapLines: Bool
     let compactMode: Bool
     let availableWidth: CGFloat?
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -287,25 +301,28 @@ private struct DiffFileSection: View {
                 )
             }
             Divider()
+                .background(diffTheme.divider)
         }
     }
 }
 
 private struct DiffFileHeader: View {
     let file: DiffFile
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         HStack(spacing: 12) {
             Text(file.displayPath)
                 .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(diffTheme.primaryText)
             Text(file.summaryText)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(diffTheme.mutedText)
             Spacer()
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
-        .background(DiffTheme.fileHeaderBackground)
+        .background(diffTheme.fileHeaderBackground)
     }
 }
 
@@ -345,15 +362,16 @@ private struct DiffHunkView: View {
 
 private struct DiffHunkHeader: View {
     let text: String
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         Text(text)
             .font(.system(size: 11, weight: .medium, design: .monospaced))
-            .foregroundStyle(DiffTheme.hunkText)
+            .foregroundStyle(diffTheme.hunkText)
             .padding(.vertical, 4)
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DiffTheme.hunkBackground)
+            .background(diffTheme.hunkBackground)
     }
 }
 
@@ -362,12 +380,13 @@ private struct DiffRowView: View {
     let wrapLines: Bool
     let availableWidth: CGFloat?
     let onReveal: (() -> Void)?
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         if row.kind == .meta || row.kind == .skip {
             DiffMetaRowView(row: row, onReveal: onReveal)
         } else {
-            let inline = DiffHighlighter.highlight(row: row)
+            let inline = DiffHighlighter.highlight(row: row, theme: diffTheme)
             let dividerWidth: CGFloat = 1
             let columnWidth = availableWidth.map { max(0, ($0 - dividerWidth) / 2) }
             HStack(spacing: 0) {
@@ -381,6 +400,7 @@ private struct DiffRowView: View {
                 )
                 Divider()
                     .frame(width: dividerWidth)
+                    .background(diffTheme.divider)
                 DiffSideView(
                     side: row.right,
                     kind: row.kind,
@@ -391,7 +411,7 @@ private struct DiffRowView: View {
                 )
             }
             .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
-            .background(DiffTheme.rowBackground(for: row.kind))
+            .background(diffTheme.rowBackground(for: row.kind))
         }
     }
 }
@@ -403,12 +423,13 @@ private struct DiffSideView: View {
     let isLeft: Bool
     let attributedText: AttributedString?
     let maxWidth: CGFloat?
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         HStack(spacing: 8) {
             Text(side?.number.map(String.init) ?? "")
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundStyle(DiffTheme.lineNumber)
+                .foregroundStyle(diffTheme.lineNumber)
                 .frame(width: 40, alignment: .trailing)
 
             let text = buildText()
@@ -425,7 +446,7 @@ private struct DiffSideView: View {
         .padding(.horizontal, 8)
         .frame(width: maxWidth, alignment: .leading)
         .frame(maxWidth: maxWidth ?? .infinity, alignment: .leading)
-        .background(DiffTheme.sideBackground(for: kind, isLeft: isLeft))
+        .background(diffTheme.sideBackground(for: kind, isLeft: isLeft))
     }
 
     private func buildText() -> Text {
@@ -434,19 +455,20 @@ private struct DiffSideView: View {
         }
         return Text(side?.text ?? "")
             .font(.system(size: 12, weight: .regular, design: .monospaced))
-            .foregroundStyle(DiffTheme.textColor(for: kind, isLeft: isLeft))
+            .foregroundStyle(diffTheme.textColor(for: kind, isLeft: isLeft))
     }
 }
 
 private struct DiffMetaRowView: View {
     let row: DiffRow
     let onReveal: (() -> Void)?
+    @Environment(\.diffTheme) private var diffTheme
 
     var body: some View {
         HStack(spacing: 8) {
             Text(row.note ?? row.left?.text ?? "")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(DiffTheme.metaText)
+                .foregroundStyle(diffTheme.metaText)
             Spacer()
             if row.kind == .skip, let onReveal {
                 Button("Show") {
@@ -459,7 +481,7 @@ private struct DiffMetaRowView: View {
         .padding(.vertical, 4)
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DiffTheme.metaBackground)
+        .background(diffTheme.metaBackground)
     }
 }
 
@@ -508,16 +530,16 @@ private enum DiffHighlighter {
         let right: AttributedString
     }
 
-    static func highlight(row: DiffRow) -> InlinePair? {
+    static func highlight(row: DiffRow, theme: DiffTheme) -> InlinePair? {
         guard row.kind == .change,
               let leftText = row.left?.text,
               let rightText = row.right?.text else {
             return nil
         }
-        return highlight(left: leftText, right: rightText)
+        return highlight(left: leftText, right: rightText, theme: theme)
     }
 
-    private static func highlight(left: String, right: String) -> InlinePair? {
+    private static func highlight(left: String, right: String, theme: DiffTheme) -> InlinePair? {
         if left.count > 500 || right.count > 500 {
             return nil
         }
@@ -537,13 +559,13 @@ private enum DiffHighlighter {
 
         func flushLeft() {
             guard !leftSegment.isEmpty else { return }
-            leftAttributed.append(makeSegment(leftSegment, kind: leftKind, font: font, isLeft: true))
+            leftAttributed.append(makeSegment(leftSegment, kind: leftKind, font: font, isLeft: true, theme: theme))
             leftSegment = ""
         }
 
         func flushRight() {
             guard !rightSegment.isEmpty else { return }
-            rightAttributed.append(makeSegment(rightSegment, kind: rightKind, font: font, isLeft: false))
+            rightAttributed.append(makeSegment(rightSegment, kind: rightKind, font: font, isLeft: false, theme: theme))
             rightSegment = ""
         }
 
@@ -630,19 +652,19 @@ private enum DiffHighlighter {
         return ops.reversed()
     }
 
-    private static func makeSegment(_ text: String, kind: EditKind, font: Font, isLeft: Bool) -> AttributedString {
+    private static func makeSegment(_ text: String, kind: EditKind, font: Font, isLeft: Bool, theme: DiffTheme) -> AttributedString {
         var chunk = AttributedString(text)
         chunk.font = font
 
         switch kind {
         case .equal:
-            chunk.foregroundColor = Color.primary
+            chunk.foregroundColor = theme.primaryText
         case .delete:
-            chunk.foregroundColor = isLeft ? DiffTheme.inlineDeleteText : DiffTheme.inlineDeleteText
-            chunk.backgroundColor = DiffTheme.inlineDeleteBackground
+            chunk.foregroundColor = isLeft ? theme.inlineDeleteText : theme.inlineDeleteText
+            chunk.backgroundColor = theme.inlineDeleteBackground
         case .insert:
-            chunk.foregroundColor = isLeft ? DiffTheme.inlineAddText : DiffTheme.inlineAddText
-            chunk.backgroundColor = DiffTheme.inlineAddBackground
+            chunk.foregroundColor = isLeft ? theme.inlineAddText : theme.inlineAddText
+            chunk.backgroundColor = theme.inlineAddBackground
         }
 
         return chunk
@@ -650,22 +672,70 @@ private enum DiffHighlighter {
 }
 
 struct DiffTheme {
-    static let headerBackground = Color(nsColor: NSColor(red: 0.14, green: 0.15, blue: 0.17, alpha: 1))
-    static let sidebarBackground = Color(nsColor: NSColor(red: 0.12, green: 0.13, blue: 0.15, alpha: 1))
-    static let sidebarSelection = Color(nsColor: NSColor(red: 0.20, green: 0.22, blue: 0.26, alpha: 1))
-    static let canvasBackground = Color(nsColor: NSColor(red: 0.10, green: 0.11, blue: 0.13, alpha: 1))
-    static let fileHeaderBackground = Color(nsColor: NSColor(red: 0.16, green: 0.17, blue: 0.20, alpha: 1))
-    static let hunkBackground = Color(nsColor: NSColor(red: 0.15, green: 0.18, blue: 0.24, alpha: 1))
-    static let hunkText = Color(nsColor: NSColor(red: 0.65, green: 0.75, blue: 0.95, alpha: 1))
-    static let lineNumber = Color(nsColor: .secondaryLabelColor)
-    static let metaBackground = Color(nsColor: NSColor(red: 0.13, green: 0.14, blue: 0.18, alpha: 1))
-    static let metaText = Color(nsColor: NSColor(red: 0.72, green: 0.76, blue: 0.86, alpha: 1))
-    static let inlineDeleteBackground = Color(nsColor: NSColor(red: 0.40, green: 0.18, blue: 0.20, alpha: 1))
-    static let inlineAddBackground = Color(nsColor: NSColor(red: 0.14, green: 0.36, blue: 0.22, alpha: 1))
-    static let inlineDeleteText = Color(nsColor: NSColor(red: 0.98, green: 0.78, blue: 0.78, alpha: 1))
-    static let inlineAddText = Color(nsColor: NSColor(red: 0.82, green: 0.98, blue: 0.88, alpha: 1))
+    let appTheme: AppTheme
 
-    static func rowBackground(for kind: DiffRowKind) -> Color {
+    private var isLight: Bool { appTheme.isLight }
+    private var baseBackground: NSColor { appTheme.background }
+    private var foreground: NSColor { appTheme.foreground }
+
+    private var addTint: NSColor { NSColor.systemGreen }
+    private var deleteTint: NSColor { NSColor.systemRed }
+
+    private func tintBackground(_ tint: NSColor, strength: CGFloat) -> NSColor {
+        baseBackground.blended(with: tint, fraction: strength)
+    }
+
+    private func tintText(_ tint: NSColor, strength: CGFloat) -> NSColor {
+        foreground.blended(with: tint, fraction: strength)
+    }
+
+    var headerBackground: Color { Color(nsColor: appTheme.secondaryBackground) }
+    var sidebarBackground: Color { Color(nsColor: appTheme.secondaryBackground) }
+    var sidebarSelection: Color { Color(nsColor: appTheme.selectionBackground) }
+    var canvasBackground: Color { Color(nsColor: appTheme.background) }
+    var fileHeaderBackground: Color { Color(nsColor: appTheme.panelBackground) }
+    var hunkBackground: Color { Color(nsColor: appTheme.lineHighlight) }
+    var hunkText: Color { Color(nsColor: appTheme.accent) }
+    var lineNumber: Color { Color(nsColor: appTheme.lineNumberForeground) }
+    var metaBackground: Color { Color(nsColor: appTheme.panelBackground) }
+    var metaText: Color { Color(nsColor: appTheme.mutedForeground) }
+    var divider: Color { Color(nsColor: appTheme.divider) }
+    var primaryText: Color { Color(nsColor: appTheme.foreground) }
+    var mutedText: Color { Color(nsColor: appTheme.mutedForeground) }
+
+    private var addBackground: Color {
+        Color(nsColor: tintBackground(addTint, strength: isLight ? 0.12 : 0.22))
+    }
+
+    private var deleteBackground: Color {
+        Color(nsColor: tintBackground(deleteTint, strength: isLight ? 0.12 : 0.22))
+    }
+
+    var inlineDeleteBackground: Color {
+        Color(nsColor: tintBackground(deleteTint, strength: isLight ? 0.20 : 0.32))
+    }
+
+    var inlineAddBackground: Color {
+        Color(nsColor: tintBackground(addTint, strength: isLight ? 0.20 : 0.32))
+    }
+
+    var inlineDeleteText: Color {
+        Color(nsColor: tintText(deleteTint, strength: isLight ? 0.55 : 0.65))
+    }
+
+    var inlineAddText: Color {
+        Color(nsColor: tintText(addTint, strength: isLight ? 0.55 : 0.65))
+    }
+
+    private var addText: Color {
+        Color(nsColor: tintText(addTint, strength: isLight ? 0.45 : 0.60))
+    }
+
+    private var deleteText: Color {
+        Color(nsColor: tintText(deleteTint, strength: isLight ? 0.45 : 0.60))
+    }
+
+    func rowBackground(for kind: DiffRowKind) -> Color {
         switch kind {
         case .add, .delete, .change:
             return Color.clear
@@ -674,14 +744,14 @@ struct DiffTheme {
         }
     }
 
-    static func sideBackground(for kind: DiffRowKind, isLeft: Bool) -> Color {
+    func sideBackground(for kind: DiffRowKind, isLeft: Bool) -> Color {
         switch kind {
         case .add:
-            return isLeft ? Color.clear : Color(nsColor: NSColor(red: 0.13, green: 0.26, blue: 0.18, alpha: 1))
+            return isLeft ? Color.clear : addBackground
         case .delete:
-            return isLeft ? Color(nsColor: NSColor(red: 0.29, green: 0.16, blue: 0.18, alpha: 1)) : Color.clear
+            return isLeft ? deleteBackground : Color.clear
         case .change:
-            return isLeft ? Color(nsColor: NSColor(red: 0.23, green: 0.15, blue: 0.17, alpha: 1)) : Color(nsColor: NSColor(red: 0.12, green: 0.24, blue: 0.18, alpha: 1))
+            return isLeft ? deleteBackground : addBackground
         case .context:
             return Color.clear
         case .meta, .skip:
@@ -689,19 +759,30 @@ struct DiffTheme {
         }
     }
 
-    static func textColor(for kind: DiffRowKind, isLeft: Bool) -> Color {
+    func textColor(for kind: DiffRowKind, isLeft: Bool) -> Color {
         switch kind {
         case .add:
-            return isLeft ? Color.secondary : Color(nsColor: NSColor(red: 0.73, green: 0.94, blue: 0.78, alpha: 1))
+            return isLeft ? mutedText : addText
         case .delete:
-            return isLeft ? Color(nsColor: NSColor(red: 0.95, green: 0.65, blue: 0.65, alpha: 1)) : Color.secondary
+            return isLeft ? deleteText : mutedText
         case .change:
-            return isLeft ? Color(nsColor: NSColor(red: 0.95, green: 0.75, blue: 0.75, alpha: 1)) : Color(nsColor: NSColor(red: 0.78, green: 0.96, blue: 0.84, alpha: 1))
+            return isLeft ? deleteText : addText
         case .context:
-            return Color.primary
+            return primaryText
         case .meta, .skip:
-            return Color.secondary
+            return mutedText
         }
+    }
+}
+
+private struct DiffThemeKey: EnvironmentKey {
+    static let defaultValue = DiffTheme(appTheme: .default)
+}
+
+extension EnvironmentValues {
+    var diffTheme: DiffTheme {
+        get { self[DiffThemeKey.self] }
+        set { self[DiffThemeKey.self] = newValue }
     }
 }
 
