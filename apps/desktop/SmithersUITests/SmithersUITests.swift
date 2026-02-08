@@ -118,6 +118,44 @@ final class SmithersUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [mainExpectation], timeout: 5), .completed, "Editor should open main.swift from command palette")
     }
 
+    func testNvimModeOpensFile() throws {
+        let dir = try createTestDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        launchWithDirectory(dir)
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10), "Window should appear")
+        window.click()
+
+        let list = app.outlines["FileTreeList"]
+        XCTAssertTrue(list.waitForExistence(timeout: 5), "File tree should appear")
+
+        openCommandPalette()
+
+        let searchField = app.textFields["CommandPaletteSearchField"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 3), "Search field should be visible")
+        searchField.click()
+        searchField.typeText(">nvim")
+
+        let results = commandPaletteResultsElement()
+        XCTAssertTrue(results.waitForExistence(timeout: 3), "Results list should appear")
+
+        let enableItem = results.staticTexts["Enable Neovim Mode"]
+        XCTAssertTrue(enableItem.waitForExistence(timeout: 3), "Enable Neovim Mode should appear in results")
+        enableItem.click()
+
+        let readme = list.staticTexts["FileTreeItem_README.md"]
+        XCTAssertTrue(readme.waitForExistence(timeout: 3))
+        readme.click()
+
+        let nvimPathLabel = app.staticTexts["NvimCurrentFilePath"]
+        XCTAssertTrue(nvimPathLabel.waitForExistence(timeout: 30), "NvimCurrentFilePath element should exist")
+        let predicate = NSPredicate(format: "label CONTAINS %@", "README.md")
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nvimPathLabel)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 30), .completed, "Neovim should report README.md as the active buffer")
+    }
+
     func testWindowScreenshot() throws {
         launchApp()
         let window = app.windows.firstMatch
