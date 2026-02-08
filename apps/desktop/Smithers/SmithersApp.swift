@@ -12,8 +12,11 @@ struct SmithersApp: App {
                 .onAppear {
                     handleLaunchArguments()
                     setInitialWindowSize()
+                    configureWindowChrome()
                 }
         }
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Open Folder...") {
@@ -35,6 +38,17 @@ struct SmithersApp: App {
             if let window = NSApp.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) {
                 window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
             }
+        }
+    }
+
+    private func configureWindowChrome() {
+        DispatchQueue.main.async {
+            guard let window = NSApp.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) else { return }
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isMovableByWindowBackground = true
+            window.styleMask.insert(.fullSizeContentView)
+            window.title = ""
         }
     }
 
