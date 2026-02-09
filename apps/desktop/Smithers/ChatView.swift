@@ -123,6 +123,14 @@ struct ChatImage: Identifiable, Hashable {
         return fromImage(image)
     }
 
+    static func fromData(_ data: Data, originalSize: CGSize, id: UUID? = nil) -> ChatImage? {
+        guard let image = NSImage(data: data) else { return nil }
+        let normalized = image.normalizedForEncoding()
+        let size = (originalSize.width > 0 && originalSize.height > 0) ? originalSize : normalized.pixelSize
+        let thumb = scaled(image: normalized, maxDimension: thumbnailMaxDimension)
+        return ChatImage(id: id ?? UUID(), data: data, thumbnail: thumb, originalSize: size)
+    }
+
     static func fromFileURL(_ url: URL) -> ChatImage? {
         guard let image = NSImage(contentsOf: url) else { return nil }
         return fromImage(image)
