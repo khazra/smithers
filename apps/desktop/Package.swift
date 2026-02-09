@@ -21,6 +21,7 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-zig.git", exact: "1.1.2"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-rust.git", exact: "0.23.3"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-go.git", exact: "0.23.4"),
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
     ],
     targets: [
         .binaryTarget(
@@ -49,12 +50,19 @@ let package = Package(
                 .product(name: "TreeSitterZig", package: "tree-sitter-zig"),
                 .product(name: "TreeSitterRust", package: "tree-sitter-rust"),
                 .product(name: "TreeSitterGo", package: "tree-sitter-go"),
+                .product(name: "GRDB", package: "GRDB.swift"),
             ],
             path: "Smithers",
+            exclude: ["Info.plist"],
             linkerSettings: [
                 .linkedLibrary("stdc++"),
                 .linkedFramework("Carbon"),
             ]
+        ),
+        .testTarget(
+            name: "SmithersTests",
+            dependencies: ["Smithers"],
+            path: "SmithersTests"
         ),
     ]
 )

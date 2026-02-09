@@ -45,6 +45,9 @@ packages:
   tree-sitter-go:
     url: https://github.com/tree-sitter/tree-sitter-go.git
     exactVersion: "0.23.4"
+  GRDB.swift:
+    url: https://github.com/groue/GRDB.swift.git
+    from: "7.0.0"
 
 targets:
   Smithers:
@@ -80,6 +83,8 @@ targets:
         product: TreeSitterRust
       - package: tree-sitter-go
         product: TreeSitterGo
+      - package: GRDB.swift
+        product: GRDB
       - framework: Carbon.framework
         embed: false
       - framework: ../../ghostty/macos/GhosttyKit.xcframework
