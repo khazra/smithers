@@ -26,6 +26,9 @@ struct CodeEditor: NSViewRepresentable {
     var font: NSFont
     var cursorStyle: EditorCursorShape = .bar
     var scrollbarMode: ScrollbarVisibilityMode
+    var showsLineNumbers: Bool
+    var highlightsCurrentLine: Bool
+    var showsIndentGuides: Bool
     var minFontSize: Double
     var maxFontSize: Double
     var saveViewState: (URL, CGPoint, NSRange) -> Void
@@ -39,8 +42,7 @@ struct CodeEditor: NSViewRepresentable {
         textView.font = font
         textView.backgroundColor = theme.background
         textView.insertionPointColor = .clear
-        textView.insertionPointWidth = Self.cursorWidth(for: font)
-        textView.highlightSelectedLine = true
+        textView.highlightSelectedLine = highlightsCurrentLine
         textView.selectedLineHighlightColor = theme.lineHighlight
         textView.widthTracksTextView = true
         textView.textColor = theme.foreground
@@ -50,12 +52,12 @@ struct CodeEditor: NSViewRepresentable {
         rulerView.invalidateHashMarks()
         rulerView.backgroundColor = theme.lineNumberBackground
         rulerView.textColor = theme.lineNumberForeground
-        rulerView.highlightSelectedLine = true
+        rulerView.highlightSelectedLine = highlightsCurrentLine
         rulerView.selectedLineTextColor = theme.lineNumberSelectedForeground
         rulerView.drawSeparator = false
         rulerView.rulerInsets = STRulerInsets(leading: 8, trailing: 8)
         scrollView.verticalRulerView = rulerView
-        scrollView.rulersVisible = true
+        scrollView.rulersVisible = showsLineNumbers
 
         scrollView.backgroundColor = theme.background
         scrollView.scrollerStyle = .overlay
@@ -70,7 +72,13 @@ struct CodeEditor: NSViewRepresentable {
         scrollbarView.theme = theme
 
         context.coordinator.attach(scrollView: scrollView, textView: textView, scrollbar: scrollbarView)
-        updateIndentGuides(textView: textView, theme: theme, font: font, coordinator: context.coordinator)
+        updateIndentGuides(
+            textView: textView,
+            theme: theme,
+            font: font,
+            isEnabled: showsIndentGuides,
+            coordinator: context.coordinator
+        )
         context.coordinator.loadFile(text: text, language: language, fileURL: fileURL, textView: textView)
         context.coordinator.appliedTheme = theme
         context.coordinator.appliedFont = font
@@ -87,13 +95,28 @@ struct CodeEditor: NSViewRepresentable {
         scrollbarView.showMode = scrollbarMode
         scrollbarView.theme = theme
         coord.attach(scrollView: scrollView, textView: textView, scrollbar: scrollbarView)
+        if scrollView.rulersVisible != showsLineNumbers {
+            scrollView.rulersVisible = showsLineNumbers
+        }
+        if textView.highlightSelectedLine != highlightsCurrentLine {
+            textView.highlightSelectedLine = highlightsCurrentLine
+        }
+        if let rulerView = scrollView.verticalRulerView as? STLineNumberRulerView {
+            rulerView.highlightSelectedLine = highlightsCurrentLine
+        }
 
         if coord.appliedTheme != theme {
             let previousTheme = coord.appliedTheme
             applyTheme(theme, previousTheme: previousTheme, to: textView, scrollView: scrollView)
             coord.appliedTheme = theme
         }
-        updateIndentGuides(textView: textView, theme: theme, font: font, coordinator: coord)
+        updateIndentGuides(
+            textView: textView,
+            theme: theme,
+            font: font,
+            isEnabled: showsIndentGuides,
+            coordinator: coord
+        )
         coord.refreshCursorAppearance(textView: textView)
 
         if coord.currentFileURL != fileURL {
@@ -113,8 +136,13 @@ struct CodeEditor: NSViewRepresentable {
             coord.loadFile(text: text, language: language, fileURL: fileURL, textView: textView)
             coord.restoreViewState(for: fileURL, textView: textView, scrollView: scrollView)
             updateLineNumberFont(font, scrollView: scrollView)
-            textView.insertionPointWidth = Self.cursorWidth(for: font)
-            updateIndentGuides(textView: textView, theme: theme, font: font, coordinator: coord)
+            updateIndentGuides(
+                textView: textView,
+                theme: theme,
+                font: font,
+                isEnabled: showsIndentGuides,
+                coordinator: coord
+            )
             coord.updateScrollMetrics(textView: textView, scrollView: scrollView)
             coord.refreshCursorAppearance(textView: textView)
             coord.refreshCursorPosition(textView: textView, restartBlink: false)
@@ -184,13 +212,18 @@ struct CodeEditor: NSViewRepresentable {
     }
 
     private func animateScrollToRange(_ range: NSRange, textView: STTextView, scrollView: NSScrollView) {
-        guard let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer else {
+        guard let textRange = NSTextRange(range, in: textView.textContentManager),
+              let targetRect = textView.textLayoutManager.textSegmentFrame(
+                  in: textRange,
+                  type: .standard,
+                  options: .rangeNotRequired
+              ) ?? textView.textLayoutManager.textSegmentFrame(
+                  at: textRange.location,
+                  type: .standard
+              ) else {
             textView.scrollRangeToVisible(range)
             return
         }
-        let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        let targetRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
         let targetY = max(0, targetRect.midY - scrollView.contentView.bounds.height / 2)
         let targetPoint = CGPoint(x: 0, y: targetY)
         NSAnimationContext.runAnimationGroup { context in
@@ -271,8 +304,16 @@ struct CodeEditor: NSViewRepresentable {
         textView: STTextView,
         theme: AppTheme,
         font: NSFont,
+        isEnabled: Bool,
         coordinator: Coordinator
     ) {
+        guard isEnabled else {
+            if let guidesView = coordinator.indentGuidesView {
+                guidesView.removeFromSuperview()
+                coordinator.indentGuidesView = nil
+            }
+            return
+        }
         let indentWidth = Self.indentGuideWidth(for: font)
         let lineColor = theme.foreground.withAlphaComponent(0.06)
         if let guidesView = coordinator.indentGuidesView {
@@ -287,7 +328,6 @@ struct CodeEditor: NSViewRepresentable {
         guidesView.lineColor = lineColor
         guidesView.frame = textView.bounds
         guidesView.autoresizingMask = [.width, .height]
-        guidesView.isOpaque = false
         textView.addSubview(guidesView, positioned: .below, relativeTo: nil)
         coordinator.indentGuidesView = guidesView
     }
@@ -307,6 +347,47 @@ struct CodeEditor: NSViewRepresentable {
         storage.endEditing()
     }
 
+    @MainActor private final class GlyphFrameCache {
+        private let cache = NSCache<NSNumber, NSValue>()
+        private var lastLayoutWidth: CGFloat = 0
+        private var lastFontSignature: String = ""
+
+        init() {
+            cache.countLimit = 2_048
+        }
+
+        func invalidate() {
+            cache.removeAllObjects()
+        }
+
+        func invalidateIfNeeded(textView: STTextView, font: NSFont) {
+            let width = textView.bounds.width
+            let signature = "\(font.fontName)-\(font.pointSize)"
+            if abs(width - lastLayoutWidth) > 0.5 || signature != lastFontSignature {
+                invalidate()
+                lastLayoutWidth = width
+                lastFontSignature = signature
+            }
+        }
+
+        func frame(for location: Int, textView: STTextView) -> NSRect? {
+            let key = NSNumber(value: location)
+            if let cached = cache.object(forKey: key) {
+                PerformanceMonitor.shared.recordGlyphCacheHit()
+                return cached.rectValue
+            }
+            guard let textRange = NSTextRange(NSRange(location: location, length: 1), in: textView.textContentManager),
+                  let rect = textView.textLayoutManager.textSegmentFrame(in: textRange, type: .standard)
+            else {
+                PerformanceMonitor.shared.recordGlyphCacheMiss()
+                return nil
+            }
+            cache.setObject(NSValue(rect: rect), forKey: key)
+            PerformanceMonitor.shared.recordGlyphCacheMiss()
+            return rect
+        }
+    }
+
     @MainActor class Coordinator: NSObject, STTextViewDelegate {
         var parent: CodeEditor
         var ignoreNextChange = false
@@ -316,7 +397,7 @@ struct CodeEditor: NSViewRepresentable {
         weak var textView: STTextView?
         private weak var lineNumberView: STLineNumberRulerView?
         private weak var scrollbarView: ScrollbarOverlayView?
-        private weak var indentGuidesView: IndentGuidesView?
+        fileprivate weak var indentGuidesView: IndentGuidesView?
         private weak var cursorView: EditorCursorView?
         private var cursorObservers: [NSObjectProtocol] = []
         private weak var cursorWindow: NSWindow?
@@ -333,6 +414,7 @@ struct CodeEditor: NSViewRepresentable {
         private var pinchStartFont: NSFont?
         private var liveFontSize: Double?
         private var isPinching = false
+        private let glyphFrameCache = GlyphFrameCache()
 
         init(parent: CodeEditor) {
             self.parent = parent
@@ -435,6 +517,7 @@ struct CodeEditor: NSViewRepresentable {
                     offset: scrollY
                 )
             )
+            glyphFrameCache.invalidateIfNeeded(textView: textView, font: parent.font)
         }
 
         private func configureScrollbarActions(scrollView: NSScrollView, scrollbar: ScrollbarOverlayView) {
@@ -515,6 +598,7 @@ struct CodeEditor: NSViewRepresentable {
             if let scrollView {
                 updateScrollMetrics(textView: textView, scrollView: scrollView)
             }
+            glyphFrameCache.invalidate()
             refreshCursorAppearance(textView: textView)
             refreshCursorPosition(textView: textView, restartBlink: false)
         }
@@ -621,33 +705,21 @@ struct CodeEditor: NSViewRepresentable {
                 let windowRect = window.convertFromScreen(screenRect)
                 return textView.convert(windowRect, from: nil)
             }
-            if let layoutManager = textView.layoutManager,
-               let textContainer = textView.textContainer,
-               layoutManager.numberOfGlyphs > 0 {
-                let glyphIndex = max(0, min(layoutManager.numberOfGlyphs - 1, layoutManager.glyphIndexForCharacter(at: clamped)))
-                var rect = layoutManager.boundingRect(
-                    forGlyphRange: NSRange(location: glyphIndex, length: 1),
-                    in: textContainer
-                )
-                rect.origin.x += textView.textContainerOrigin.x
-                rect.origin.y += textView.textContainerOrigin.y
+            let length = textView.attributedString().length
+            guard length > 0 else { return nil }
+            let resolved = max(0, min(clamped, max(0, length - 1)))
+            if let rect = glyphFrameCache.frame(for: resolved, textView: textView) {
                 return rect
             }
             return nil
         }
 
         private func cursorCellWidth(textView: STTextView, font: NSFont, location: Int) -> CGFloat {
-            if let layoutManager = textView.layoutManager,
-               let textContainer = textView.textContainer,
-               layoutManager.numberOfGlyphs > 0 {
-                let length = textView.attributedString().length
+            let length = textView.attributedString().length
+            if length > 0 {
                 let clamped = max(0, min(location, max(0, length - 1)))
-                let glyphIndex = max(0, min(layoutManager.numberOfGlyphs - 1, layoutManager.glyphIndexForCharacter(at: clamped)))
-                let rect = layoutManager.boundingRect(
-                    forGlyphRange: NSRange(location: glyphIndex, length: 1),
-                    in: textContainer
-                )
-                if rect.width > 0 {
+                if let rect = glyphFrameCache.frame(for: clamped, textView: textView),
+                   rect.width > 0 {
                     return rect.width
                 }
             }
@@ -710,6 +782,7 @@ struct CodeEditor: NSViewRepresentable {
             textView.setAttributedString(NSAttributedString(string: text, attributes: attrs))
             textView.typingAttributes = attrs
             lastAppliedText = text
+            glyphFrameCache.invalidate()
         }
 
         func resetHighlighterCache() {
@@ -726,6 +799,7 @@ struct CodeEditor: NSViewRepresentable {
             let newText = textView.attributedString().string
             parent.text = newText
             lastAppliedText = newText
+            glyphFrameCache.invalidate()
             scheduleHighlight(textView: textView, text: newText, delay: 0.25)
             if let scrollView {
                 updateScrollMetrics(textView: textView, scrollView: scrollView)
@@ -935,6 +1009,7 @@ private final class IndentGuidesView: NSView {
     var lineColor: NSColor = NSColor.white.withAlphaComponent(0.06) {
         didSet { needsDisplay = true }
     }
+    override var isOpaque: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -966,6 +1041,9 @@ struct ContentView: View {
     @State private var focusedPane: FocusedPane? = .editor
     @State private var editorViewStates: [URL: EditorViewState] = [:]
     @State private var editorScrollMetrics = EditorScrollMetrics()
+#if DEBUG
+    @StateObject private var performanceMonitor = PerformanceMonitor.shared
+#endif
     private let shortcutsPanelWidth: CGFloat = 200
 
     var body: some View {
@@ -1099,8 +1177,10 @@ struct ContentView: View {
                     Divider()
                         .background(workspace.theme.dividerColor)
                     KeyboardShortcutsPanel(workspace: workspace, tmuxKeyHandler: tmuxKeyHandler)
-                        .frame(width: shortcutsPanelWidth, maxHeight: .infinity)
+                        .frame(width: shortcutsPanelWidth)
+                        .frame(maxHeight: .infinity)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
                 }
             }
             .navigationTitle("")
@@ -1145,6 +1225,24 @@ struct ContentView: View {
                 .allowsHitTesting(false)
                 .zIndex(4)
             }
+
+#if DEBUG
+            if workspace.isPerformanceOverlayEnabled {
+                PerformanceOverlayView(monitor: performanceMonitor, theme: workspace.theme)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 10)
+                    .padding(.trailing, 12)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+                    .zIndex(5)
+            }
+
+            if workspace.isPerformanceOverlayEnabled || workspace.isPerformanceLoggingEnabled {
+                PerformanceFrameTicker(monitor: performanceMonitor)
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+            }
+#endif
 
             // Hidden accessibility element for test observability of nvim active file.
             // Uses .accessibilityHidden(false) to ensure XCUITest can find it despite zero size.
@@ -1197,6 +1295,9 @@ struct ContentView: View {
                     theme: workspace.theme,
                     font: workspace.editorFont,
                     scrollbarMode: workspace.scrollbarVisibilityMode,
+                    showsLineNumbers: true,
+                    highlightsCurrentLine: true,
+                    showsIndentGuides: true,
                     minFontSize: WorkspaceState.minEditorFontSize,
                     maxFontSize: WorkspaceState.maxEditorFontSize,
                     saveViewState: { url, scrollOrigin, selection in
@@ -1216,8 +1317,10 @@ struct ContentView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                MinimapView(metrics: editorScrollMetrics, theme: workspace.theme)
-                    .frame(width: 70)
+                if workspace.showMinimap {
+                    MinimapView(metrics: editorScrollMetrics, theme: workspace.theme)
+                        .frame(width: 70)
+                }
             }
 
             if workspace.isEditorLoading {
@@ -1587,61 +1690,7 @@ struct TabBar: View {
             ScrollView(.horizontal, showsIndicators: true) {
                 HStack(spacing: 6) {
                     ForEach(workspace.openFiles, id: \.self) { url in
-                        let isChat = workspace.isChatURL(url)
-                        let isDiff = workspace.isDiffURL(url)
-                        if workspace.isTerminalURL(url),
-                           let view = workspace.terminalViews[url] {
-                            TerminalTabBarItem(
-                                view: view,
-                                isSelected: url == workspace.selectedFileURL,
-                                theme: theme,
-                                onSelect: { workspace.selectFile(url) },
-                                onClose: { workspace.requestCloseFile(url) }
-                            )
-                            .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
-                            .contextMenu { tabContextMenu(for: url) }
-                            .draggable(url.absoluteString) {
-                                Text(tabTitle(for: url))
-                                    .font(.system(size: Typography.s, weight: .medium))
-                                    .padding(4)
-                                    .background(theme.tabSelectedBackgroundColor)
-                                    .cornerRadius(4)
-                            }
-                            .dropDestination(for: String.self, isTargeted: dropTargetBinding(for: url)) { items, _ in
-                                handleDrop(items, target: url)
-                            }
-                        } else {
-                            let diffInfo = isDiff ? workspace.diffTab(for: url) : nil
-                            let diffSubtitle = diffInfo?.summary.isEmpty == false ? diffInfo?.summary : "Diff view"
-                            let isModified = workspace.isFileModified(url)
-                            TabBarItem(
-                                title: isChat ? "Chat" : (diffInfo?.title ?? url.lastPathComponent),
-                                subtitle: isChat ? "Current chat" : (diffSubtitle ?? workspace.displayPath(for: url)),
-                                icon: isChat ? "bubble.left.and.bubble.right" : (isDiff ? "arrow.left.and.right" : iconForFile(url.lastPathComponent)),
-                                isSelected: url == workspace.selectedFileURL,
-                                isModified: isModified,
-                                isDropTarget: dragTarget == url,
-                                theme: theme,
-                                onSelect: {
-                                    workspace.selectFile(url)
-                                },
-                                onClose: {
-                                    workspace.requestCloseFile(url)
-                                }
-                            )
-                            .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
-                            .contextMenu { tabContextMenu(for: url) }
-                            .draggable(url.absoluteString) {
-                                Text(tabTitle(for: url))
-                                    .font(.system(size: Typography.s, weight: .medium))
-                                    .padding(4)
-                                    .background(theme.tabSelectedBackgroundColor)
-                                    .cornerRadius(4)
-                            }
-                            .dropDestination(for: String.self, isTargeted: dropTargetBinding(for: url)) { items, _ in
-                                handleDrop(items, target: url)
-                            }
-                        }
+                        tabItem(for: url, theme: theme)
                     }
                 }
                 .animation(.easeInOut(duration: 0.15), value: workspace.openFiles)
@@ -1681,19 +1730,81 @@ struct TabBar: View {
         .background(theme.tabBarBackgroundColor)
     }
 
-    private func dropTargetBinding(for url: URL) -> Binding<Bool> {
-        Binding(
-            get: { dragTarget == url },
-            set: { isTargeted in
-                dragTarget = isTargeted ? url : nil
-            }
-        )
-    }
-
     private func handleDrop(_ items: [String], target: URL) -> Bool {
         guard let item = items.first, let source = URL(string: item) else { return false }
         workspace.moveTab(from: source, to: target)
         return true
+    }
+
+    @ViewBuilder
+    private func tabItem(for url: URL, theme: AppTheme) -> some View {
+        if workspace.isTerminalURL(url),
+           let view = workspace.terminalViews[url] {
+            tabItemModifiers(
+                TerminalTabBarItem(
+                    view: view,
+                    isSelected: url == workspace.selectedFileURL,
+                    theme: theme,
+                    onSelect: { workspace.selectFile(url) },
+                    onClose: { workspace.requestCloseFile(url) }
+                ),
+                url: url,
+                theme: theme
+            )
+        } else {
+            let isChat = workspace.isChatURL(url)
+            let isDiff = workspace.isDiffURL(url)
+            let diffInfo = isDiff ? workspace.diffTab(for: url) : nil
+            let diffSubtitle = diffInfo?.summary.isEmpty == false ? diffInfo?.summary : "Diff view"
+            let isModified = workspace.isFileModified(url)
+            tabItemModifiers(
+                TabBarItem(
+                    title: isChat ? "Chat" : (diffInfo?.title ?? url.lastPathComponent),
+                    subtitle: isChat ? "Current chat" : (diffSubtitle ?? workspace.displayPath(for: url)),
+                    icon: isChat ? "bubble.left.and.bubble.right" : (isDiff ? "arrow.left.and.right" : iconForFile(url.lastPathComponent)),
+                    isSelected: url == workspace.selectedFileURL,
+                    isModified: isModified,
+                    isDropTarget: dragTarget == url,
+                    theme: theme,
+                    onSelect: {
+                        workspace.selectFile(url)
+                    },
+                    onClose: {
+                        workspace.requestCloseFile(url)
+                    }
+                ),
+                url: url,
+                theme: theme
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func tabItemModifiers<Content: View>(_ content: Content, url: URL, theme: AppTheme) -> some View {
+        content
+            .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
+            .contextMenu { tabContextMenu(for: url) }
+            .draggable(url.absoluteString) {
+                tabDragPreview(for: url, theme: theme)
+            }
+            .dropDestination(
+                for: String.self,
+                action: { items, _ in
+                    handleDrop(items, target: url)
+                },
+                isTargeted: { isTargeted in
+                    dragTarget = isTargeted ? url : nil
+                }
+            )
+    }
+
+    @ViewBuilder
+    private func tabDragPreview(for url: URL, theme: AppTheme) -> some View {
+        Text(tabTitle(for: url))
+            .font(.system(size: Typography.s, weight: .medium))
+            .padding(4)
+            .background(theme.tabSelectedBackgroundColor)
+            .cornerRadius(4)
     }
 
     @ViewBuilder
@@ -1735,116 +1846,5 @@ struct TabBar: View {
             return "arrow.left.and.right"
         }
         return iconForFile(url.lastPathComponent)
-    }
-}
-
-struct TabBarItem: View {
-    let title: String
-    let subtitle: String
-    let icon: String
-    let isSelected: Bool
-    let isModified: Bool
-    let isDropTarget: Bool
-    let theme: AppTheme
-    let onSelect: () -> Void
-    let onClose: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        let helpText = isModified ? "\(subtitle)\nUnsaved changes" : subtitle
-        let fileColor = colorForFile(title)
-        let showClose = isModified ? isHovered : (isHovered || isSelected)
-        let showDot = isModified && !isHovered
-        let borderColor = isDropTarget
-            ? theme.accentColor
-            : (isSelected ? theme.tabBorderColor : theme.tabBorderColor.opacity(0.6))
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: Typography.base))
-                .foregroundStyle(fileColor?.opacity(0.8) ?? theme.mutedForegroundColor)
-            Text(title)
-                .font(.system(size: Typography.base, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(isSelected ? theme.tabSelectedForegroundColor : theme.tabForegroundColor)
-            ZStack {
-                if showDot {
-                    let dotColor = isSelected ? theme.tabSelectedForegroundColor : theme.accentColor
-                    Circle()
-                        .fill(dotColor)
-                        .frame(width: 7, height: 7)
-                        .accessibilityLabel("Unsaved changes")
-                        .transition(.opacity)
-                }
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: Typography.xs, weight: .bold))
-                        .foregroundStyle(theme.mutedForegroundColor)
-                        .padding(4)
-                }
-                .buttonStyle(.plain)
-                .opacity(showClose ? 1 : 0)
-                .allowsHitTesting(showClose)
-                .accessibilityLabel("Close \(title)")
-            }
-            .frame(width: 18, height: 18)
-            .animation(.easeInOut(duration: 0.12), value: showClose)
-            .animation(.easeInOut(duration: 0.12), value: showDot)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isSelected ? theme.tabSelectedBackgroundColor : (isHovered ? theme.tabSelectedBackgroundColor.opacity(0.5) : Color.clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(borderColor)
-        )
-        .overlay(alignment: .bottom) {
-            if isSelected {
-                Rectangle()
-                    .fill(theme.accentColor)
-                    .frame(height: 2)
-            }
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .onTapGesture(perform: onSelect)
-        .onHover { isHovered = $0 }
-        .help(helpText)
-    }
-}
-
-func iconForFile(_ name: String) -> String {
-    let ext = (name as NSString).pathExtension.lowercased()
-    switch ext {
-    case "swift": return "swift"
-    case "py": return "text.page"
-    case "js", "ts", "jsx", "tsx": return "curlybraces"
-    case "json": return "curlybraces.square"
-    case "md", "txt", "readme": return "doc.plaintext"
-    case "yml", "yaml", "toml": return "gearshape"
-    case "png", "jpg", "jpeg", "gif", "svg", "webp", "ico": return "photo"
-    case "html", "css": return "globe"
-    case "sh", "zsh", "bash": return "terminal"
-    case "zip", "tar", "gz": return "doc.zipper"
-    case "resolved": return "lock"
-    default: return "doc.text"
-    }
-}
-
-func colorForFile(_ name: String) -> Color? {
-    let ext = (name as NSString).pathExtension.lowercased()
-    switch ext {
-    case "swift": return .orange
-    case "py": return Color(red: 0.3, green: 0.6, blue: 0.9)
-    case "js": return .yellow
-    case "ts", "tsx": return Color(red: 0.2, green: 0.5, blue: 0.8)
-    case "json": return .yellow.opacity(0.8)
-    case "md": return Color(red: 0.5, green: 0.7, blue: 0.9)
-    case "html": return .orange
-    case "css": return Color(red: 0.3, green: 0.5, blue: 0.8)
-    case "sh", "zsh", "bash": return .green
-    default: return nil
     }
 }
