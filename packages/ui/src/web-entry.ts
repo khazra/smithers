@@ -7,7 +7,9 @@ function createWebRpcClient(handlers: any): any {
     "workflowEvent",
     "workflowFrame",
     "workspaceState",
+    "workspaceStatus",
     "toast",
+    "mergeProgress",
   ] as const;
 
   const request = new Proxy({} as any, {

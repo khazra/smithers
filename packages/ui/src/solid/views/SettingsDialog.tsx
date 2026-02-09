@@ -17,6 +17,12 @@ export const SettingsDialog: Component<SettingsDialogProps> = (props) => {
   const [panelWidth, setPanelWidth] = createSignal(
     settings()?.ui.workflowPanel.width ?? 380,
   );
+  const [defaultIncludeCode, setDefaultIncludeCode] = createSignal(
+    settings()?.ui.forks?.defaultIncludeCode ?? false,
+  );
+  const [defaultCodeMode, setDefaultCodeMode] = createSignal(
+    settings()?.ui.forks?.defaultCodeMode ?? "shared",
+  );
   const [provider, setProvider] = createSignal(
     settings()?.agent.provider ?? "openai",
   );
@@ -45,6 +51,8 @@ export const SettingsDialog: Component<SettingsDialogProps> = (props) => {
 
     setPanelOpen(s.ui.workflowPanel.isOpen);
     setPanelWidth(s.ui.workflowPanel.width);
+    setDefaultIncludeCode(s.ui.forks?.defaultIncludeCode ?? false);
+    setDefaultCodeMode(s.ui.forks?.defaultCodeMode ?? "shared");
     setProvider(s.agent.provider as "openai" | "anthropic");
     setModel(s.agent.model);
     setTemperature(s.agent.temperature ?? 0.2);
@@ -65,7 +73,13 @@ export const SettingsDialog: Component<SettingsDialogProps> = (props) => {
       (provider() === "anthropic" ? "claude-3-5-sonnet-20241022" : "gpt-4o-mini");
     const updated = await rpc.request.setSettings({
       patch: {
-        ui: { workflowPanel: { isOpen: panelOpen(), width: panelWidth() } },
+        ui: {
+          workflowPanel: { isOpen: panelOpen(), width: panelWidth() },
+          forks: {
+            defaultIncludeCode: defaultIncludeCode(),
+            defaultCodeMode: defaultCodeMode() as any,
+          },
+        },
         agent: {
           provider: provider(),
           model: m,
@@ -142,6 +156,28 @@ export const SettingsDialog: Component<SettingsDialogProps> = (props) => {
         value={panelWidth()}
         onInput={(e) => setPanelWidth(Number(e.currentTarget.value))}
       />
+
+      <label class={labelClass}>Default fork includes code</label>
+      <select
+        class={inputClass}
+        value={defaultIncludeCode() ? "true" : "false"}
+        onChange={(e) => setDefaultIncludeCode(e.currentTarget.value === "true")}
+      >
+        <option value="false">Context only</option>
+        <option value="true">Include code state</option>
+      </select>
+
+      <Show when={defaultIncludeCode()}>
+        <label class={labelClass}>Default fork code mode</label>
+        <select
+          class={inputClass}
+          value={defaultCodeMode()}
+          onChange={(e) => setDefaultCodeMode(e.currentTarget.value)}
+        >
+          <option value="shared">Shared code state</option>
+          <option value="sandboxed">Separate sandbox</option>
+        </select>
+      </Show>
 
       <div class={sectionClass}>AI Provider</div>
 

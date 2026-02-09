@@ -8,7 +8,7 @@ import {
   createMemo,
   on,
 } from "solid-js";
-import { appState, setAppState } from "../stores/app-store";
+import { appState, setAppState, pushToast } from "../stores/app-store";
 import { switchSession, createNewSession, focusRun, getRpc } from "../index";
 import { shortenPath, truncate, formatTime } from "../lib/format";
 import { cn } from "../lib/utils";
@@ -269,6 +269,21 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
     streamingMessage: null,
   });
   const [mentionItems, setMentionItems] = createSignal<MentionItem[]>([]);
+  const [forkDialogOpen, setForkDialogOpen] = createSignal(false);
+  const [forkMessageSeq, setForkMessageSeq] = createSignal<number | null>(null);
+  const [forkMessageLabel, setForkMessageLabel] = createSignal("");
+  const [forkIncludeCode, setForkIncludeCode] = createSignal(
+    appState.settings?.ui.forks?.defaultIncludeCode ?? false,
+  );
+  const [forkCodeMode, setForkCodeMode] = createSignal(
+    appState.settings?.ui.forks?.defaultCodeMode ?? "shared",
+  );
+  const [forkPoint, setForkPoint] = createSignal<"before" | "after">("after");
+  const [forkFanout, setForkFanout] = createSignal(1);
+  const [snapshotStrategy, setSnapshotStrategy] = createSignal<"nearest" | "capture">("capture");
+  const [mergeDialogOpen, setMergeDialogOpen] = createSignal(false);
+  const [mergeChanges, setMergeChanges] = createSignal<Array<{ path: string; status: string }>>([]);
+  const [mergeSelection, setMergeSelection] = createSignal<Set<string>>(new Set());
 
   let messagesEndRef!: HTMLDivElement;
   let textareaRef!: HTMLTextAreaElement;
@@ -295,6 +310,21 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
 
   const isStreaming = () => chatState().isStreaming;
   const hasError = () => chatState().error;
+
+  const messageLabel = (msg: Message): string => {
+    if (msg.role === "user") {
+      return getUserText(msg as any).slice(0, 80);
+    }
+    if (msg.role === "assistant") {
+      const blocks = (msg as any).content ?? [];
+      const text = blocks
+        .filter((b: any) => b.type === "text")
+        .map((b: any) => b.text)
+        .join(" ");
+      return text.slice(0, 80);
+    }
+    return msg.role;
+  };
 
   createEffect(
     on(
@@ -362,6 +392,27 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
     }
     const text = inputValue().trim();
     if (!text || !appState.agent) return;
+    if (
+      appState.activeFork &&
+      appState.activeFork.codeMode !== "context_only" &&
+      appState.workspaceStatus?.activeForkId !== appState.activeFork.forkId
+    ) {
+      const proceed = confirm("This fork's code state is inactive. Activate it before running?");
+      if (!proceed) return;
+      try {
+        if (appState.sessionId) {
+          await getRpc().request.activateCodeState({ sessionId: appState.sessionId });
+        }
+      } catch (err: any) {
+        const message = err?.message ?? "Failed to activate code state.";
+        const force = confirm(`${message} Switch anyway?`);
+        if (force && appState.sessionId) {
+          await getRpc().request.activateCodeState({ sessionId: appState.sessionId, force: true });
+        } else {
+          return;
+        }
+      }
+    }
     setInputValue("");
     if (textareaRef) {
       textareaRef.style.height = "auto";
@@ -378,6 +429,71 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
 
   const toggleInspector = () => {
     setAppState("inspectorOpen", (v) => !v);
+  };
+
+  const openForkDialog = (seq: number, label: string) => {
+    const settings = appState.settings;
+    setForkMessageSeq(seq);
+    setForkMessageLabel(label);
+    setForkIncludeCode(settings?.ui.forks?.defaultIncludeCode ?? false);
+    setForkCodeMode(settings?.ui.forks?.defaultCodeMode ?? "shared");
+    setForkPoint("after");
+    setForkFanout(1);
+    setSnapshotStrategy("capture");
+    setForkDialogOpen(true);
+  };
+
+  const submitFork = async () => {
+    const seq = forkMessageSeq();
+    if (seq === null || !appState.sessionId) return;
+    try {
+      const res = await getRpc().request.forkChat({
+        sessionId: appState.sessionId,
+        messageSeq: seq,
+        forkPoint: forkPoint(),
+        includeCode: forkIncludeCode(),
+        codeMode: forkIncludeCode() ? (forkCodeMode() as any) : "context_only",
+        fanout: forkFanout(),
+        snapshotStrategy: snapshotStrategy(),
+      });
+      const sessions = await getRpc().request.listChatSessions({});
+      setAppState("sessions", sessions);
+      if (res.sessionIds?.length) {
+        await switchSession(res.sessionIds[0]!);
+      }
+      setForkDialogOpen(false);
+    } catch (err: any) {
+      pushToast("error", err?.message ?? "Failed to fork chat.");
+    }
+  };
+
+  const openMergeDialog = async () => {
+    const fork = appState.activeFork;
+    if (!fork) return;
+    try {
+      const res = await getRpc().request.previewForkMerge({ forkId: fork.forkId });
+      setMergeChanges(res.changes ?? []);
+      setMergeSelection(new Set((res.changes ?? []).map((c) => c.path)));
+      setMergeDialogOpen(true);
+    } catch (err: any) {
+      pushToast("error", err?.message ?? "Failed to load merge preview.");
+    }
+  };
+
+  const applyMerge = async () => {
+    const fork = appState.activeFork;
+    if (!fork) return;
+    try {
+      const files = Array.from(mergeSelection());
+      await getRpc().request.mergeFork({
+        forkId: fork.forkId,
+        mode: "diff_apply",
+        files,
+      });
+      setMergeDialogOpen(false);
+    } catch (err: any) {
+      pushToast("error", err?.message ?? "Merge failed.");
+    }
   };
 
   const handleSessionChange = (sessionId: string) => {
@@ -399,7 +515,7 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
           <For each={appState.sessions}>
             {(s) => (
               <option value={s.sessionId}>
-                {s.title || s.sessionId.slice(0, 10)}
+                {(s.title || s.sessionId.slice(0, 10)) + (s.forkId ? " ↳" : "")}
               </option>
             )}
           </For>
@@ -426,6 +542,46 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
           <span class="text-[10px] text-accent font-mono bg-accent/10 rounded px-1.5 py-0.5">
             run:{appState.contextRunId!.slice(0, 8)}
           </span>
+        </Show>
+
+        <Show when={appState.activeFork}>
+          <span class="text-[10px] text-warning font-mono bg-warning/10 rounded px-1.5 py-0.5">
+            fork:{appState.activeFork!.forkId.slice(0, 6)}
+          </span>
+        </Show>
+
+        <Show when={appState.workspaceStatus?.isDirty}>
+          <span class="text-[10px] text-danger font-mono bg-danger/10 rounded px-1.5 py-0.5">
+            dirty
+          </span>
+        </Show>
+
+        <Show when={appState.activeFork && appState.activeFork.codeMode !== "context_only" && appState.workspaceStatus?.activeForkId !== appState.activeFork?.forkId}>
+          <button
+            class="text-[10px] px-2 py-1 rounded border border-border bg-panel-2 text-muted hover:text-foreground"
+            onClick={async () => {
+              if (!appState.sessionId) return;
+              try {
+                await getRpc().request.activateCodeState({ sessionId: appState.sessionId });
+              } catch (err: any) {
+                const message = err?.message ?? \"Workspace has uncommitted changes.\";
+                const proceed = confirm(`${message} Switch anyway?`);
+                if (!proceed) return;
+                await getRpc().request.activateCodeState({ sessionId: appState.sessionId, force: true });
+              }
+            }}
+          >
+            Activate code state
+          </button>
+        </Show>
+
+        <Show when={appState.activeFork && appState.activeFork.sourceSessionId && appState.activeFork.codeMode === "sandboxed"}>
+          <button
+            class="text-[10px] px-2 py-1 rounded border border-border bg-panel-2 text-muted hover:text-foreground"
+            onClick={openMergeDialog}
+          >
+            Merge back
+          </button>
         </Show>
 
         <button
@@ -458,9 +614,10 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
                   chatState().streamingMessage !== null &&
                   idx() === allMessages().length - 1 &&
                   msg.role === "assistant";
+                const canFork = () => (msg.role === "user" || msg.role === "assistant") && !isStreamingMsg();
 
                 return (
-                  <>
+                  <div class="group relative">
                     <Show when={msg.role === "user"}>
                       <UserBubble
                         msg={msg as { content: string | (TextContent | ImageContent)[] }}
@@ -476,7 +633,16 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
                     <Show when={msg.role === "workflow"}>
                       <WorkflowCard msg={msg as WorkflowCardMessage} />
                     </Show>
-                  </>
+                    <Show when={canFork()}>
+                      <button
+                        class="message-action absolute -top-2 right-0 text-[10px] px-2 py-0.5 rounded-full border border-border bg-panel-2 text-muted opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => openForkDialog(idx(), messageLabel(msg))}
+                        title="Fork from here"
+                      >
+                        Fork
+                      </button>
+                    </Show>
+                  </div>
                 );
               }}
             </For>
@@ -524,6 +690,146 @@ export const ChatView: Component<{ onRunWorkflow?: (preselect?: string) => void 
           </div>
         </div>
       </div>
+
+      <Show when={forkDialogOpen()}>
+        <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div class="bg-panel border border-border rounded-lg p-4 w-[420px] shadow-xl">
+            <div class="text-xs font-semibold uppercase tracking-wide mb-2">Fork Chat</div>
+            <div class="text-[11px] text-subtle mb-3">
+              {forkMessageLabel() || "Select a message to fork from."}
+            </div>
+
+            <label class="text-[10px] text-muted uppercase tracking-wide">Fork point</label>
+            <div class="flex gap-2 mt-1 mb-3 text-xs">
+              <label class="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="fork-point"
+                  checked={forkPoint() === "before"}
+                  onChange={() => setForkPoint("before")}
+                />
+                Before message
+              </label>
+              <label class="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="fork-point"
+                  checked={forkPoint() === "after"}
+                  onChange={() => setForkPoint("after")}
+                />
+                After message
+              </label>
+            </div>
+
+            <label class="text-[10px] text-muted uppercase tracking-wide">Include code state</label>
+            <select
+              class="w-full bg-background border border-border text-foreground text-xs rounded-lg px-2 py-1.5 mt-1"
+              value={forkIncludeCode() ? "true" : "false"}
+              onChange={(e) => setForkIncludeCode(e.currentTarget.value === "true")}
+            >
+              <option value="false">Context only</option>
+              <option value="true">Include code state</option>
+            </select>
+
+            <Show when={forkIncludeCode()}>
+              <label class="text-[10px] text-muted uppercase tracking-wide mt-3">Code mode</label>
+              <select
+                class="w-full bg-background border border-border text-foreground text-xs rounded-lg px-2 py-1.5 mt-1"
+                value={forkCodeMode()}
+                onChange={(e) => setForkCodeMode(e.currentTarget.value)}
+              >
+                <option value="shared">Shared code state</option>
+                <option value="sandboxed">Separate sandbox</option>
+              </select>
+
+              <label class="text-[10px] text-muted uppercase tracking-wide mt-3">Snapshot fallback</label>
+              <select
+                class="w-full bg-background border border-border text-foreground text-xs rounded-lg px-2 py-1.5 mt-1"
+                value={snapshotStrategy()}
+                onChange={(e) => setSnapshotStrategy(e.currentTarget.value as any)}
+              >
+                <option value="capture">Capture now if missing</option>
+                <option value="nearest">Use nearest snapshot</option>
+              </select>
+            </Show>
+
+            <label class="text-[10px] text-muted uppercase tracking-wide mt-3">Fan-out</label>
+            <input
+              class="w-full bg-background border border-border text-foreground text-xs rounded-lg px-2 py-1.5 mt-1"
+              type="number"
+              min="1"
+              value={forkFanout()}
+              onInput={(e) => setForkFanout(Math.max(1, Number(e.currentTarget.value)))}
+            />
+            <Show when={forkIncludeCode() && forkCodeMode() === "sandboxed"}>
+              <div class="text-[10px] text-subtle mt-1">
+                This will create {forkFanout()} sandbox{forkFanout() === 1 ? "" : "es"}.
+              </div>
+            </Show>
+
+            <div class="flex justify-end gap-2 mt-4">
+              <button
+                class="text-xs px-3 py-1 rounded border border-border bg-panel-2 text-muted hover:text-foreground"
+                onClick={() => setForkDialogOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                class="text-xs px-3 py-1 rounded border border-accent bg-accent/20 text-accent hover:bg-accent/30"
+                onClick={submitFork}
+              >
+                Fork
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={mergeDialogOpen()}>
+        <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div class="bg-panel border border-border rounded-lg p-4 w-[520px] max-h-[70vh] overflow-hidden shadow-xl">
+            <div class="text-xs font-semibold uppercase tracking-wide mb-2">Merge Back</div>
+            <div class="text-[11px] text-subtle mb-3">Select changes to apply to the target workspace.</div>
+            <div class="border border-border rounded-lg bg-background max-h-[45vh] overflow-y-auto">
+              <For each={mergeChanges()}>
+                {(change) => (
+                  <label class="flex items-center gap-2 px-3 py-2 text-xs border-b border-border last:border-b-0">
+                    <input
+                      type="checkbox"
+                      checked={mergeSelection().has(change.path)}
+                      onChange={(e) => {
+                        const next = new Set(mergeSelection());
+                        if (e.currentTarget.checked) next.add(change.path);
+                        else next.delete(change.path);
+                        setMergeSelection(next);
+                      }}
+                    />
+                    <span class="font-mono text-[10px] text-muted">{change.status}</span>
+                    <span class="truncate">{change.path}</span>
+                  </label>
+                )}
+              </For>
+              <Show when={mergeChanges().length === 0}>
+                <div class="px-3 py-4 text-xs text-subtle">No changes detected.</div>
+              </Show>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+              <button
+                class="text-xs px-3 py-1 rounded border border-border bg-panel-2 text-muted hover:text-foreground"
+                onClick={() => setMergeDialogOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                class="text-xs px-3 py-1 rounded border border-accent bg-accent/20 text-accent hover:bg-accent/30"
+                onClick={applyMerge}
+              >
+                Apply changes
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 };

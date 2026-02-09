@@ -11,6 +11,9 @@ import type {
   SettingsDTO,
   SecretStatusDTO,
   WorkflowRef,
+  ForkRecordDTO,
+  WorkspaceStatusDTO,
+  ChatSessionSummary,
 } from "@smithers/shared";
 
 export type AppView = "chat" | "runs" | "workflows" | "settings";
@@ -26,7 +29,10 @@ export type AppState = {
   currentView: AppView;
   agent: ChatAgent | null;
   sessionId: string | null;
-  sessions: Array<{ sessionId: string; title?: string | null }>;
+  sessions: ChatSessionSummary[];
+  forks: ForkRecordDTO[];
+  activeFork: ForkRecordDTO | null;
+  workspaceStatus: WorkspaceStatusDTO | null;
   workspaceRoot: string | null;
   settings: SettingsDTO | null;
   secretStatus: SecretStatusDTO;
@@ -56,6 +62,9 @@ const initialState: AppState = {
   agent: null,
   sessionId: null,
   sessions: [],
+  forks: [],
+  activeFork: null,
+  workspaceStatus: null,
   workspaceRoot: null,
   settings: null,
   secretStatus: { openai: false, anthropic: false },

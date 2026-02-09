@@ -167,14 +167,16 @@ class BunAgentTransport {
 export { BunAgentTransport };
 
 async function bootstrap() {
-  const [settings, secretStatus] = await Promise.all([
+  const [settings, secretStatus, workspaceStatus] = await Promise.all([
     rpc.request.getSettings({}),
     rpc.request.getSecretStatus({}),
+    rpc.request.getWorkspaceStatus({}),
   ]);
   setAppState({
     settings,
     secretStatus,
     inspectorOpen: settings.ui.workflowPanel.isOpen,
+    workspaceStatus,
   });
 
   const sessions = await rpc.request.listChatSessions({});
@@ -206,12 +208,14 @@ async function bootstrap() {
 async function bootstrapSession(sessionId: string) {
   setAppState("sessionId", sessionId);
   const session = await rpc.request.getChatSession({ sessionId });
+  const fork = await rpc.request.getSessionFork({ sessionId }).then((r) => r.fork);
+  const forks = await rpc.request.listForks({ sessionId }).then((r) => r.forks);
   const transport = new BunAgentTransport(sessionId);
   const agent = new ChatAgent({
     transport,
     initialState: { messages: (session.messages ?? []) as Message[] },
   });
-  setAppState("agent", agent);
+  setAppState({ agent, activeFork: fork ?? null, forks });
 }
 
 export async function switchSession(sessionId: string) {
@@ -298,8 +302,19 @@ export function startApp(createRpc: RpcFactory) {
         });
         void refreshRuns();
       },
+      workspaceStatus: (payload: any) => {
+        setAppState("workspaceStatus", payload);
+      },
       toast: (payload: any) => {
         pushToast(payload.level, payload.message);
+      },
+      mergeProgress: (payload: any) => {
+        if (payload.status === "done") {
+          pushToast("info", "Merge completed.");
+        }
+        if (payload.conflicts?.length) {
+          pushToast("warning", `Merge conflicts: ${payload.conflicts.join(", ")}`);
+        }
       },
     },
   });
