@@ -237,6 +237,42 @@ final class NvimController {
         _ = try await rpc.request("nvim_command", params: [.string("wall")])
     }
 
+    func scrollToTopLine(_ topLine: Int) async {
+        await waitUntilReady()
+        let script = """
+        local top = ...
+        local win = vim.api.nvim_get_current_win()
+        local buf = vim.api.nvim_win_get_buf(win)
+        local total = vim.api.nvim_buf_line_count(buf)
+        local height = vim.api.nvim_win_get_height(win)
+        local max_top = math.max(1, total - height + 1)
+        top = math.min(max_top, math.max(1, math.floor(top)))
+        local view = vim.fn.winsaveview()
+        view.topline = top
+        vim.fn.winrestview(view)
+        """
+        let params: [MsgPackValue] = [.int(Int64(topLine))]
+        _ = try? await rpc.request("nvim_exec_lua", params: [.string(script), .array(params)])
+    }
+
+    func scrollByLines(_ delta: Int) async {
+        await waitUntilReady()
+        let script = """
+        local delta = ...
+        local win = vim.api.nvim_get_current_win()
+        local buf = vim.api.nvim_win_get_buf(win)
+        local total = vim.api.nvim_buf_line_count(buf)
+        local height = vim.api.nvim_win_get_height(win)
+        local view = vim.fn.winsaveview()
+        local max_top = math.max(1, total - height + 1)
+        local target = math.min(max_top, math.max(1, view.topline + delta))
+        view.topline = target
+        vim.fn.winrestview(view)
+        """
+        let params: [MsgPackValue] = [.int(Int64(delta))]
+        _ = try? await rpc.request("nvim_exec_lua", params: [.string(script), .array(params)])
+    }
+
     private func connectWithRetry() async throws {
         var lastError: Error?
         for _ in 0..<200 {
@@ -323,10 +359,41 @@ final class NvimController {
           vim.rpcnotify(chan, "smithers/buf", { event = event, buf = buf, name = name, listed = listed })
         end
 
+        local function emit_mode()
+          local mode = vim.api.nvim_get_mode().mode
+          vim.rpcnotify(chan, "smithers/mode", { mode = mode })
+        end
+
+        local function emit_viewport()
+          local win = vim.api.nvim_get_current_win()
+          if win == nil or win == 0 then
+            return
+          end
+          local buf = vim.api.nvim_win_get_buf(win)
+          if buf == nil or buf == 0 then
+            return
+          end
+          local topline = 1
+          local botline = 1
+          vim.api.nvim_win_call(win, function()
+            topline = vim.fn.line("w0")
+            botline = vim.fn.line("w$")
+          end)
+          local linecount = vim.api.nvim_buf_line_count(buf)
+          vim.rpcnotify(chan, "smithers/viewport", {
+            win = win,
+            buf = buf,
+            topline = topline,
+            botline = botline,
+            linecount = linecount,
+          })
+        end
+
         vim.api.nvim_create_autocmd({ "BufEnter", "BufAdd" }, {
           group = group,
           callback = function(args)
             emit("enter", args.buf)
+            emit_viewport()
           end,
         })
 
@@ -341,6 +408,7 @@ final class NvimController {
           group = group,
           callback = function(args)
             emit("write", args.buf)
+            emit_viewport()
           end,
         })
 
@@ -351,6 +419,21 @@ final class NvimController {
             local listed = vim.bo[args.buf].buflisted
             local modified = vim.bo[args.buf].modified
             vim.rpcnotify(chan, "smithers/buf", { event = "modified", buf = args.buf, name = name, listed = listed, modified = modified })
+            emit_viewport()
+          end,
+        })
+
+        vim.api.nvim_create_autocmd({ "ModeChanged" }, {
+          group = group,
+          callback = function()
+            emit_mode()
+          end,
+        })
+
+        vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter", "WinScrolled", "CursorMoved", "CursorMovedI", "VimResized" }, {
+          group = group,
+          callback = function()
+            emit_viewport()
           end,
         })
 
@@ -361,6 +444,9 @@ final class NvimController {
             vim.rpcnotify(chan, "smithers/colorscheme", { name = name })
           end,
         })
+
+        emit_mode()
+        emit_viewport()
         """
 
         _ = try await rpc.request(
@@ -383,6 +469,24 @@ final class NvimController {
     private func handleNotification(method: String, params: [MsgPackValue]) async {
         if method == "smithers/colorscheme" {
             await refreshColorscheme(reason: "colorscheme")
+            return
+        }
+        if method == "smithers/mode" {
+            guard let payload = params.first?.mapValue,
+                  let mode = payload["mode"]?.stringValue else { return }
+            workspace?.handleNvimModeChange(rawMode: mode)
+            return
+        }
+        if method == "smithers/viewport" {
+            guard let payload = params.first?.mapValue else { return }
+            let topLine = parseInt(payload["topline"]) ?? 1
+            let bottomLine = parseInt(payload["botline"]) ?? topLine
+            let lineCount = parseInt(payload["linecount"]) ?? bottomLine
+            workspace?.handleNvimViewport(
+                topLine: Int(topLine),
+                bottomLine: Int(bottomLine),
+                lineCount: Int(lineCount)
+            )
             return
         }
         guard method == "smithers/buf" else { return }
@@ -585,6 +689,19 @@ final class NvimController {
         }
         if let intValue = value?.intValue {
             return intValue != 0
+        }
+        return nil
+    }
+
+    private func parseInt(_ value: MsgPackValue?) -> Int64? {
+        if let intValue = value?.intValue {
+            return intValue
+        }
+        if let doubleValue = value?.doubleValue {
+            return Int64(doubleValue)
+        }
+        if let stringValue = value?.stringValue, let parsed = Int64(stringValue) {
+            return parsed
         }
         return nil
     }
