@@ -178,6 +178,12 @@ private struct CommandPalettePanel: View {
                         Text(command.title)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        Spacer()
+                        if let shortcut = command.shortcut {
+                            Text(shortcut)
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     .tag(command.id)
                     .contentShape(Rectangle())
@@ -366,7 +372,7 @@ private struct CommandPalettePanel: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(workspace.theme.panelBackgroundColor.opacity(0.25))
+        .background(workspace.theme.panelBackgroundColor)
     }
 
     private func updatePreview(for entry: PaletteSelection?) {
