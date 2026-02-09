@@ -966,6 +966,8 @@ struct CodeEditor: NSViewRepresentable {
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
                 if !ghostText.isEmpty {
+                    cancelPendingCompletion()
+                    cancelInFlightCompletion()
                     clearGhostText(textView: textView)
                     return true
                 }
@@ -1148,6 +1150,8 @@ struct CodeEditor: NSViewRepresentable {
         private func applyGhostText(textView: STTextView) {
             guard !ghostText.isEmpty else { return }
             let insertion = ghostText
+            cancelPendingCompletion()
+            cancelInFlightCompletion()
             clearGhostText(textView: textView)
             isApplyingCompletion = true
             textView.insertText(insertion, replacementRange: textView.selectedRange())
@@ -1531,6 +1535,15 @@ struct ContentView: View {
                                 } else {
                                     pane(emptyEditor, pane: .editor)
                                 }
+                            } else if workspace.isWebviewURL(selectedURL) {
+                                if let webView = workspace.webviewView(for: selectedURL) {
+                                    pane(
+                                        WebviewTabView(webView: webView),
+                                        pane: .editor
+                                    )
+                                } else {
+                                    pane(emptyEditor, pane: .editor)
+                                }
                             } else {
                                 if workspace.isNvimModeEnabled {
                                     if let failure = workspace.nvimFailure {
@@ -1548,21 +1561,25 @@ struct ContentView: View {
                                         )
                                     } else if let nvimView = workspace.nvimTerminalView {
                                         pane(
-                                            TerminalTabView(
-                                                view: nvimView,
-                                                scrollbarMode: workspace.scrollbarVisibilityMode,
-                                                scrollbarMetrics: nvimScrollbarMetrics,
-                                                theme: workspace.theme,
-                                                floatingWindowEffects: workspace.nvimFloatingWindowEffects,
-                                                onScrollToOffset: { offset in
-                                                    let topLine = Int(offset.rounded()) + 1
-                                                    workspace.scrollNvimToTopLine(topLine)
-                                                },
-                                                onPageScroll: { direction in
-                                                    let lines = workspace.nvimViewport?.visibleLineCount ?? 1
-                                                    workspace.scrollNvimByLines(lines * direction)
-                                                }
-                                            ),
+                                            ZStack {
+                                                TerminalTabView(
+                                                    view: nvimView,
+                                                    scrollbarMode: workspace.scrollbarVisibilityMode,
+                                                    scrollbarMetrics: nvimScrollbarMetrics,
+                                                    theme: workspace.theme,
+                                                    floatingWindowEffects: workspace.nvimFloatingWindowEffects,
+                                                    onScrollToOffset: { offset in
+                                                        let topLine = Int(offset.rounded()) + 1
+                                                        workspace.scrollNvimToTopLine(topLine)
+                                                    },
+                                                    onPageScroll: { direction in
+                                                        let lines = workspace.nvimViewport?.visibleLineCount ?? 1
+                                                        workspace.scrollNvimByLines(lines * direction)
+                                                    }
+                                                )
+                                                NvimExtUIOverlay(workspace: workspace)
+                                                    .allowsHitTesting(false)
+                                            },
                                             pane: .terminal
                                         )
                                     } else {
@@ -1617,6 +1634,19 @@ struct ContentView: View {
                 .transition(toastTransition)
                 .allowsHitTesting(false)
                 .zIndex(3)
+            }
+
+            if let overlay = workspace.activeOverlay {
+                WorkspaceOverlayView(
+                    overlay: overlay,
+                    theme: workspace.theme,
+                    onDismiss: { workspace.dismissOverlay(id: overlay.id) }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: overlay.position.alignment)
+                .padding(.bottom, overlay.position == .bottom ? toastBottomPadding : 0)
+                .padding(.top, overlay.position == .top ? 24 : 0)
+                .transition(.move(edge: overlay.position.transitionEdge).combined(with: .opacity))
+                .zIndex(4)
             }
 
             if workspace.isProgressBarVisible {
@@ -1963,6 +1993,7 @@ private struct StatusBar: View {
             if workspace.isChatURL(selectedURL) { return "Chat" }
             if workspace.isTerminalURL(selectedURL) { return "Terminal" }
             if workspace.isDiffURL(selectedURL) { return "Diff" }
+            if workspace.isWebviewURL(selectedURL) { return "Webview" }
             return "Editor"
         }()
 
@@ -2176,14 +2207,26 @@ struct TabBar: View {
         } else {
             let isChat = workspace.isChatURL(url)
             let isDiff = workspace.isDiffURL(url)
+            let isWebview = workspace.isWebviewURL(url)
             let diffInfo = isDiff ? workspace.diffTab(for: url) : nil
+            let webviewInfo = isWebview ? workspace.webviewTab(for: url) : nil
             let diffSubtitle = diffInfo?.summary.isEmpty == false ? diffInfo?.summary : "Diff view"
             let isModified = workspace.isFileModified(url)
             tabItemModifiers(
                 TabBarItem(
-                    title: isChat ? "Chat" : (diffInfo?.title ?? url.lastPathComponent),
-                    subtitle: isChat ? "Current chat" : (diffSubtitle ?? workspace.displayPath(for: url)),
-                    icon: isChat ? "bubble.left.and.bubble.right" : (isDiff ? "arrow.left.and.right" : iconForFile(url.lastPathComponent)),
+                    title: isChat
+                        ? workspace.chatTitle(for: url)
+                        : (isDiff
+                            ? (diffInfo?.title ?? "Diff")
+                            : (isWebview ? (webviewInfo?.title ?? "Webview") : url.lastPathComponent)),
+                    subtitle: isChat
+                        ? workspace.chatSubtitle(for: url)
+                        : (isDiff
+                            ? diffSubtitle
+                            : (isWebview ? (webviewInfo?.url.absoluteString ?? "Webview") : workspace.displayPath(for: url))),
+                    icon: isChat
+                        ? (workspace.isMainChatURL(url) ? "bubble.left.and.bubble.right" : "sparkles")
+                        : (isDiff ? "arrow.left.and.right" : (isWebview ? "globe" : iconForFile(url.lastPathComponent))),
                     isSelected: url == workspace.selectedFileURL,
                     isModified: isModified,
                     isDropTarget: dragTarget == url,
@@ -2245,7 +2288,7 @@ struct TabBar: View {
 
     private func tabTitle(for url: URL) -> String {
         if workspace.isChatURL(url) {
-            return "Chat"
+            return workspace.chatTitle(for: url)
         }
         if workspace.isTerminalURL(url) {
             let title = workspace.terminalViews[url]?.title ?? ""
@@ -2254,18 +2297,24 @@ struct TabBar: View {
         if workspace.isDiffURL(url) {
             return workspace.diffTab(for: url)?.title ?? "Diff"
         }
+        if workspace.isWebviewURL(url) {
+            return workspace.webviewTab(for: url)?.title ?? "Webview"
+        }
         return url.lastPathComponent
     }
 
     private func tabIcon(for url: URL) -> String {
         if workspace.isChatURL(url) {
-            return "bubble.left.and.bubble.right"
+            return workspace.isMainChatURL(url) ? "bubble.left.and.bubble.right" : "sparkles"
         }
         if workspace.isTerminalURL(url) {
             return "terminal"
         }
         if workspace.isDiffURL(url) {
             return "arrow.left.and.right"
+        }
+        if workspace.isWebviewURL(url) {
+            return "globe"
         }
         return iconForFile(url.lastPathComponent)
     }
