@@ -59,7 +59,7 @@ final class SmithersCtlInterpreter {
 
     private func handleOpen(args: [String], cwd: String?) -> SmithersCtlResult {
         guard let workspace else { return .error("smithers-ctl: no workspace") }
-        var path: String?
+        var paths: [String] = []
         var line: Int?
         var column: Int?
         var index = 0
@@ -90,28 +90,32 @@ final class SmithersCtlInterpreter {
             if arg.hasPrefix("--") {
                 return .error("smithers-ctl open: unknown option \(arg)")
             }
-            if path == nil {
-                path = arg
-            }
+            paths.append(arg)
             index += 1
         }
 
-        guard let path else {
+        guard !paths.isEmpty else {
             return .error("smithers-ctl open: missing <path>")
         }
 
-        guard let url = resolvePath(path, cwd: cwd, allowDirectory: false) else {
-            return .error("smithers-ctl open: file not found: \(path)")
+        var openedURLs: [URL] = []
+        for (idx, path) in paths.enumerated() {
+            guard let url = resolvePath(path, cwd: cwd, requireDirectory: false) else {
+                return .error("smithers-ctl open: file not found: \(path)")
+            }
+            if idx == 0, let line {
+                let safeLine = max(1, line)
+                let safeColumn = max(1, column ?? 1)
+                workspace.openFileAtLocation(url, line: safeLine, column: safeColumn)
+            } else {
+                workspace.selectFile(url)
+            }
+            openedURLs.append(url)
         }
-
-        if let line {
-            let safeLine = max(1, line)
-            let safeColumn = max(1, column ?? 1)
-            workspace.openFileAtLocation(url, line: safeLine, column: safeColumn)
-        } else {
-            workspace.selectFile(url)
+        if openedURLs.count == 1, let url = openedURLs.first {
+            return .ok("opened \(workspace.displayPath(for: url))")
         }
-        return .ok("opened \(workspace.displayPath(for: url))")
+        return .ok("opened \(openedURLs.count) items")
     }
 
     private func handleTerminal(args: [String], cwd: String?) -> SmithersCtlResult {
@@ -149,7 +153,7 @@ final class SmithersCtlInterpreter {
 
         let resolvedCwd: String?
         if let workingDirectory {
-            guard let cwdURL = resolvePath(workingDirectory, cwd: cwd, allowDirectory: true) else {
+            guard let cwdURL = resolvePath(workingDirectory, cwd: cwd, requireDirectory: true) else {
                 return .error("smithers-ctl terminal: invalid --cwd \(workingDirectory)")
             }
             resolvedCwd = cwdURL.path
@@ -404,7 +408,7 @@ final class SmithersCtlInterpreter {
         return .ok(url.absoluteString)
     }
 
-    private func resolvePath(_ path: String, cwd: String?, allowDirectory: Bool) -> URL? {
+    private func resolvePath(_ path: String, cwd: String?, requireDirectory: Bool) -> URL? {
         let expanded = (path as NSString).expandingTildeInPath
         let fm = FileManager.default
         let baseURL: URL?
@@ -426,9 +430,8 @@ final class SmithersCtlInterpreter {
         let normalized = candidate.standardizedFileURL
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: normalized.path, isDirectory: &isDir) else { return nil }
-        if isDir.boolValue && !allowDirectory {
-            return nil
-        }
+        if requireDirectory && !isDir.boolValue { return nil }
+        if !requireDirectory && isDir.boolValue { return nil }
         return normalized
     }
 

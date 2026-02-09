@@ -84,15 +84,15 @@ func makeOpenURL(for item: SmithersIPCOpenItem) -> URL? {
     return components.url
 }
 
-func launchViaOpen(items: [SmithersIPCOpenItem]) {
-    for item in items {
-        guard let url = makeOpenURL(for: item) else { continue }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = [url.absoluteString]
-        try? process.run()
-        process.waitUntilExit()
-    }
+func launchViaOpen(items: [SmithersIPCOpenItem], activateOnly: Bool = false) {
+    let launchItems = activateOnly ? Array(items.prefix(1)) : items
+    let urls = launchItems.compactMap(makeOpenURL(for:))
+    guard !urls.isEmpty else { return }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    process.arguments = urls.map(\.absoluteString)
+    try? process.run()
+    process.waitUntilExit()
 }
 
 func sendIPCRequest(
@@ -106,16 +106,21 @@ func sendIPCRequest(
     let queue = DispatchQueue(label: "com.smithers.cli.ipc")
 
     let stateSemaphore = DispatchSemaphore(value: 0)
+    let stateLock = NSLock()
     var ready = false
     var stateError: NWError?
 
     connection.stateUpdateHandler = { state in
         switch state {
         case .ready:
+            stateLock.lock()
             ready = true
+            stateLock.unlock()
             stateSemaphore.signal()
         case .failed(let error):
+            stateLock.lock()
             stateError = error
+            stateLock.unlock()
             stateSemaphore.signal()
         case .cancelled:
             stateSemaphore.signal()
@@ -131,9 +136,14 @@ func sendIPCRequest(
         throw IPCClientError.connectionTimedOut
     }
 
-    guard ready else {
+    stateLock.lock()
+    let isReady = ready
+    let error = stateError
+    stateLock.unlock()
+
+    guard isReady else {
         connection.cancel()
-        throw IPCClientError.connectionFailed(stateError?.localizedDescription ?? "Not ready")
+        throw IPCClientError.connectionFailed(error?.localizedDescription ?? "Not ready")
     }
 
     var payload = try JSONEncoder().encode(request)
@@ -307,7 +317,7 @@ if let response = try? sendIPCRequest(
     exit(handleResponse(response))
 }
 
-launchViaOpen(items: items)
+launchViaOpen(items: items, activateOnly: waitRequested)
 
 if waitRequested {
     let deadline = Date().addingTimeInterval(10)
