@@ -14,3 +14,6 @@
 [submodule "references/neovide"]
 	path = references/neovide
 	url = https://github.com/neovide/neovide.git
+[submodule "references/CodeEdit"]
+	path = references/CodeEdit
+	url = https://github.com/CodeEditApp/CodeEdit.git
