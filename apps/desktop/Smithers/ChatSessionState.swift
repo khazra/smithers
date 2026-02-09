@@ -5,6 +5,7 @@ final class ChatSessionState: ObservableObject, Identifiable {
     let id: String
     let title: String
     let createdAt: Date
+    var threadId: String?
 
     @Published var messages: [ChatMessage]
     @Published var draft: String
@@ -13,6 +14,7 @@ final class ChatSessionState: ObservableObject, Identifiable {
     @Published var activeDiffPreview: DiffPreview?
     @Published var activeSessionDiff: SessionDiffSnapshot?
     @Published var activeSkills: [ActiveSkill]
+    var sessionDiffSnapshot: SessionDiffSnapshot?
 
     var turnDiffs: [String: String]
     var turnDiffOrder: [String]
@@ -23,17 +25,20 @@ final class ChatSessionState: ObservableObject, Identifiable {
         id: String,
         title: String,
         createdAt: Date = Date(),
+        threadId: String? = nil,
         messages: [ChatMessage],
         draft: String = "",
         draftImages: [ChatImage] = [],
         isTurnInProgress: Bool = false,
         activeDiffPreview: DiffPreview? = nil,
         activeSessionDiff: SessionDiffSnapshot? = nil,
-        activeSkills: [ActiveSkill] = []
+        activeSkills: [ActiveSkill] = [],
+        sessionDiffSnapshot: SessionDiffSnapshot? = nil
     ) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
+        self.threadId = threadId
         self.messages = messages
         self.draft = draft
         self.draftImages = draftImages
@@ -41,6 +46,7 @@ final class ChatSessionState: ObservableObject, Identifiable {
         self.activeDiffPreview = activeDiffPreview
         self.activeSessionDiff = activeSessionDiff
         self.activeSkills = activeSkills
+        self.sessionDiffSnapshot = sessionDiffSnapshot
         self.turnDiffs = [:]
         self.turnDiffOrder = []
         self.streamingTurnDiffs = [:]
