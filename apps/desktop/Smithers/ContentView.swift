@@ -1511,7 +1511,6 @@ struct ContentView: View {
                 }
                     .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 400)
                     .overlay(SidebarResizeHandle(theme: workspace.preferences.theme), alignment: .trailing)
-                    .overlay(FocusRing(isActive: focusedPane == .sidebar, theme: workspace.preferences.theme))
                     .contentShape(Rectangle())
                     .onTapGesture {
                         focusedPane = .sidebar
@@ -1971,8 +1970,14 @@ private struct FocusRing: View {
     let theme: AppTheme
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .strokeBorder(isActive ? theme.accentColor.opacity(0.35) : Color.clear, lineWidth: 2)
+        // Subtle top-edge highlight for active pane instead of full border
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(isActive ? theme.accentColor.opacity(0.25) : Color.clear)
+                .frame(height: 1)
+            Spacer(minLength: 0)
+        }
+        .animation(.easeInOut(duration: 0.15), value: isActive)
     }
 }
 
@@ -1999,30 +2004,30 @@ private struct BreadcrumbBar: View {
 
     var body: some View {
         let parts = path.split(separator: "/").map(String.init)
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             if parts.isEmpty {
                 Text("Workspace")
-                    .font(.system(size: Typography.s, weight: .medium))
-                    .foregroundStyle(theme.mutedForegroundColor)
+                    .font(.system(size: Typography.xs, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(Typography.textFaint))
             } else {
                 ForEach(parts.indices, id: \.self) { index in
                     Text(parts[index])
-                        .font(.system(size: Typography.s, weight: index == parts.count - 1 ? .semibold : .regular))
+                        .font(.system(size: Typography.xs, weight: index == parts.count - 1 ? .medium : .regular))
                         .foregroundStyle(index == parts.count - 1
-                            ? theme.foregroundColor
-                            : theme.mutedForegroundColor)
+                            ? Color.white.opacity(Typography.textMuted)
+                            : Color.white.opacity(Typography.textFaint))
                     if index < parts.count - 1 {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: Typography.xs, weight: .semibold))
-                            .foregroundStyle(theme.mutedForegroundColor.opacity(0.8))
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.25))
                     }
                 }
             }
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(theme.secondaryBackgroundColor)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(theme.backgroundColor)
     }
 }
 
@@ -2044,39 +2049,45 @@ private struct StatusBar: View {
             return "Editor"
         }()
 
-        HStack(spacing: 12) {
-            if isRegular {
-                Text("Ln \(workspace.cursorLine), Col \(workspace.cursorColumn)")
-                    .font(.system(size: Typography.s, weight: .medium, design: .monospaced))
-                Text("UTF-8")
-                Text("LF")
-            } else {
-                Text(viewLabel)
-                    .font(.system(size: Typography.s, weight: .medium))
-            }
-
-            Spacer()
-
-            if !workspace.activeSkills.isEmpty {
-                Button("Skills: \(skillsSummary)") {
-                    showSkillsPopover.toggle()
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(theme.dividerColor)
+                .frame(height: 1)
+            HStack(spacing: 10) {
+                if isRegular {
+                    Text("Ln \(workspace.cursorLine), Col \(workspace.cursorColumn)")
+                        .font(.system(size: Typography.xs, weight: .medium, design: .monospaced))
+                    Text("UTF-8")
+                    Text("LF")
+                } else {
+                    Text(viewLabel)
+                        .font(.system(size: Typography.xs, weight: .medium))
                 }
-                .buttonStyle(.borderless)
-                .popover(isPresented: $showSkillsPopover) {
-                    ActiveSkillsPopover(workspace: workspace)
-                        .frame(minWidth: 220)
-                        .padding(10)
-                }
-            }
 
-            Text(workspace.currentLanguage?.name ?? "Plain Text")
-            Text("Spaces: 4")
+                Spacer()
+
+                if !workspace.activeSkills.isEmpty {
+                    Button("Skills: \(skillsSummary)") {
+                        showSkillsPopover.toggle()
+                    }
+                    .buttonStyle(.borderless)
+                    .popover(isPresented: $showSkillsPopover) {
+                        ActiveSkillsPopover(workspace: workspace)
+                            .frame(minWidth: 220)
+                            .padding(10)
+                    }
+                }
+
+                Text(workspace.currentLanguage?.name ?? "Plain Text")
+                Text("Spaces: 4")
+            }
+            .font(.system(size: Typography.xs, weight: .regular))
+            .foregroundStyle(Color.white.opacity(Typography.textFaint))
+            .padding(.horizontal, 10)
+            .frame(height: height - 1)
+            .background(theme.secondaryBackgroundColor)
         }
-        .font(.system(size: Typography.s, weight: .regular))
-        .foregroundStyle(theme.mutedForegroundColor)
-        .padding(.horizontal, 12)
         .frame(height: height)
-        .background(theme.secondaryBackgroundColor)
     }
 
     private var skillsSummary: String {
@@ -2160,33 +2171,57 @@ private struct MinimapView: View {
     let metrics: EditorScrollMetrics
     let theme: AppTheme
 
+    // Deterministic pseudo-random line widths for code skeleton
+    private static let lineWidths: [CGFloat] = [
+        0.45, 0.72, 0.38, 0.65, 0.82, 0.55, 0.30, 0.68, 0.50, 0.78,
+        0.42, 0.60, 0.35, 0.70, 0.48, 0.85, 0.32, 0.62, 0.75, 0.40,
+        0.58, 0.28, 0.80, 0.52, 0.65, 0.38, 0.72, 0.45, 0.60, 0.50,
+        0.20, 0.00, 0.55, 0.68, 0.42, 0.35, 0.78, 0.48, 0.62, 0.30,
+    ]
+
     var body: some View {
         GeometryReader { proxy in
             let total = max(metrics.contentHeight, 1)
             let viewportRatio = min(1, metrics.viewportHeight / total)
             let scrollable = max(total - metrics.viewportHeight, 1)
             let scrollRatio = min(1, metrics.scrollY / scrollable)
-            let indicatorHeight = max(24, proxy.size.height * viewportRatio)
+            let indicatorHeight = max(20, proxy.size.height * viewportRatio)
             let indicatorY = (proxy.size.height - indicatorHeight) * scrollRatio
 
-            ZStack(alignment: .top) {
-                Rectangle()
-                    .fill(theme.panelBackgroundColor)
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(theme.accentColor.opacity(0.18))
+            ZStack(alignment: .topLeading) {
+                theme.backgroundColor.opacity(0.6)
+
+                // Code skeleton lines
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(0..<Self.lineWidths.count, id: \.self) { i in
+                        let w = Self.lineWidths[i]
+                        if w > 0 {
+                            RoundedRectangle(cornerRadius: 0.5)
+                                .fill(theme.foregroundColor.opacity(0.06))
+                                .frame(width: max(4, (proxy.size.width - 12) * w), height: 1.5)
+                        } else {
+                            Spacer().frame(height: 1.5)
+                        }
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+
+                // Viewport indicator
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(theme.foregroundColor.opacity(0.06))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .stroke(theme.accentColor.opacity(0.35), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .stroke(theme.foregroundColor.opacity(0.10), lineWidth: 0.5)
                     )
                     .frame(height: indicatorHeight)
                     .offset(y: indicatorY)
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 2)
             }
         }
-        .background(theme.panelBackgroundColor)
         .overlay(
             Rectangle()
-                .fill(theme.panelBorderColor.opacity(0.4))
+                .fill(theme.dividerColor)
                 .frame(width: 1),
             alignment: .leading
         )
@@ -2250,15 +2285,15 @@ struct TabBar: View {
 
     var body: some View {
         let theme = workspace.preferences.theme
-        HStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: true) {
-                HStack(spacing: 6) {
+        HStack(spacing: 4) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
                     ForEach(workspace.openFiles, id: \.self) { url in
                         tabItem(for: url, theme: theme)
                     }
                 }
                 .animation(.easeInOut(duration: 0.15), value: workspace.openFiles)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 4)
             }
 
@@ -2482,15 +2517,15 @@ struct SidebarModeBar: View {
         Button(action: action) {
             VStack(spacing: 2) {
                 Image(systemName: icon)
-                    .font(.system(size: Typography.base))
+                    .font(.system(size: Typography.s))
                 Text(label)
                     .font(.system(size: Typography.xs))
             }
-            .foregroundStyle(isActive ? theme.accentColor : theme.mutedForegroundColor)
+            .foregroundStyle(isActive ? theme.accentColor : theme.mutedForegroundColor.opacity(0.7))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 4)
-            .background(isActive ? theme.accentColor.opacity(0.1) : Color.clear)
-            .cornerRadius(6)
+            .background(isActive ? theme.accentColor.opacity(0.08) : Color.clear)
+            .cornerRadius(5)
         }
         .buttonStyle(.plain)
     }

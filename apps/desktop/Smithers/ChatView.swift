@@ -401,11 +401,56 @@ enum CommandExecutionStatus: Hashable {
 }
 
 struct ChatView: View {
+    private enum ActiveSheet: Identifiable {
+        case diff(DiffPreview)
+        case session(SessionDiffSnapshot)
+
+        var id: String {
+            switch self {
+            case .diff(let preview):
+                return preview.id.uuidString
+            case .session(let snapshot):
+                return snapshot.id
+            }
+        }
+    }
+
     @ObservedObject var workspace: WorkspaceState
     var onFocusChange: ((Bool) -> Void)? = nil
     @FocusState private var inputFocused: Bool
     @State private var selectedImage: ChatImage?
     @State private var isDropTargeted = false
+
+    private var activeSheetBinding: Binding<ActiveSheet?> {
+        Binding(
+            get: {
+                if let preview = workspace.activeDiffPreview {
+                    return .diff(preview)
+                }
+                if let snapshot = workspace.activeSessionDiff {
+                    return .session(snapshot)
+                }
+                return nil
+            },
+            set: { newValue in
+                switch newValue {
+                case .diff(let preview):
+                    workspace.activeDiffPreview = preview
+                    workspace.activeSessionDiff = nil
+                case .session(let snapshot):
+                    workspace.activeSessionDiff = snapshot
+                    workspace.activeDiffPreview = nil
+                case nil:
+                    clearActiveSheet()
+                }
+            }
+        )
+    }
+
+    private func clearActiveSheet() {
+        workspace.activeDiffPreview = nil
+        workspace.activeSessionDiff = nil
+    }
 
     var body: some View {
         let theme = workspace.preferences.theme
@@ -425,29 +470,31 @@ struct ChatView: View {
         .onChange(of: inputFocused) { _, newValue in
             onFocusChange?(newValue)
         }
-        .sheet(item: $workspace.activeDiffPreview) { preview in
-            DiffViewer(
-                title: preview.title,
-                summary: preview.summary,
-                diff: preview.diff,
-                theme: workspace.preferences.theme,
-                onOpenInTab: {
-                    workspace.openDiffTab(title: preview.title, summary: preview.summary, diff: preview.diff)
-                    workspace.activeDiffPreview = nil
-                }
-            )
-        }
-        .sheet(item: $workspace.activeSessionDiff) { snapshot in
-            DiffViewer(
-                title: snapshot.title,
-                summary: snapshot.summary,
-                diff: snapshot.diff,
-                theme: workspace.preferences.theme,
-                onOpenInTab: {
-                    workspace.openDiffTab(title: snapshot.title, summary: snapshot.summary, diff: snapshot.diff)
-                    workspace.activeSessionDiff = nil
-                }
-            )
+        .sheet(item: activeSheetBinding) { sheet in
+            switch sheet {
+            case .diff(let preview):
+                DiffViewer(
+                    title: preview.title,
+                    summary: preview.summary,
+                    diff: preview.diff,
+                    theme: workspace.preferences.theme,
+                    onOpenInTab: {
+                        workspace.openDiffTab(title: preview.title, summary: preview.summary, diff: preview.diff)
+                        clearActiveSheet()
+                    }
+                )
+            case .session(let snapshot):
+                DiffViewer(
+                    title: snapshot.title,
+                    summary: snapshot.summary,
+                    diff: snapshot.diff,
+                    theme: workspace.preferences.theme,
+                    onOpenInTab: {
+                        workspace.openDiffTab(title: snapshot.title, summary: snapshot.summary, diff: snapshot.diff)
+                        clearActiveSheet()
+                    }
+                )
+            }
         }
         .overlay {
             if let image = selectedImage {
@@ -462,7 +509,7 @@ struct ChatView: View {
     private func chatMessagesSection(theme: AppTheme) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(workspace.chatMessages) { message in
                         ChatBubble(
                             message: message,
@@ -471,8 +518,7 @@ struct ChatView: View {
                         )
                             .id(message.id)
                             .transition(.asymmetric(
-                                insertion: .move(edge: message.role == .user ? .trailing : .leading)
-                                    .combined(with: .opacity),
+                                insertion: .opacity,
                                 removal: .opacity
                             ))
                     }
@@ -480,12 +526,15 @@ struct ChatView: View {
                         ThinkingRow()
                     }
                 }
-                .animation(.spring(duration: 0.3, bounce: 0.1), value: workspace.chatMessages.count)
-                .padding(16)
+                .animation(.easeInOut(duration: 0.2), value: workspace.chatMessages.count)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
             .background(theme.backgroundColor)
-            .onChange(of: workspace.chatMessages) { _, messages in
-                guard let last = messages.last else { return }
+            .onChange(of: workspace.chatMessages.count) { _, _ in
+                guard let last = workspace.chatMessages.last else { return }
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
@@ -495,12 +544,18 @@ struct ChatView: View {
 
     @ViewBuilder
     private func chatInputSection(theme: AppTheme) -> some View {
-        HStack(spacing: 8) {
-            chatInputField(theme: theme)
-            chatActionButtons
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(theme.dividerColor)
+                .frame(height: 1)
+            HStack(spacing: 8) {
+                chatInputField(theme: theme)
+                chatActionButtons
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(theme.secondaryBackgroundColor)
         }
-        .padding(12)
-        .background(theme.secondaryBackgroundColor)
     }
 
     @ViewBuilder
@@ -601,17 +656,27 @@ struct ChatBubble: View {
     }()
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            if message.role == .assistant {
-                roleBadge
-                bubble
-                Spacer(minLength: 24)
-            } else {
-                Spacer(minLength: 24)
-                bubble
-                roleBadge
+        HStack(alignment: .top, spacing: 8) {
+            roleIndicator
+            VStack(alignment: .leading, spacing: 3) {
+                roleLabel
+                bubbleContent
+                Text(timestampText)
+                    .font(.system(size: Typography.xs, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(Typography.textFaint))
+                    .opacity(isHovered ? 0.9 : 0.5)
+            }
+            .padding(.vertical, 8)
+            .padding(.trailing, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .topTrailing) {
+                if showActions && !message.isStreaming {
+                    MessageActionBar(message: message, workspace: workspace)
+                        .transition(.opacity)
+                }
             }
         }
+        .padding(.vertical, 4)
         .onHover { hovering in
             isHovered = hovering
             if hovering {
@@ -622,30 +687,30 @@ struct ChatBubble: View {
                 showActions = false
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isHovered ? bubbleColor : Color.clear)
+        )
     }
 
-    private var bubble: some View {
-        VStack(alignment: message.role == .assistant ? .leading : .trailing, spacing: 4) {
-            bubbleContent
-            Text(timestampText)
-                .font(.system(size: Typography.xs, weight: .regular))
-                .foregroundStyle(.secondary)
-                .opacity(isHovered ? 0.9 : 0.6)
-        }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(bubbleColor)
-            )
-            .overlay(alignment: .topTrailing) {
-                if showActions && !message.isStreaming {
-                    MessageActionBar(message: message, workspace: workspace)
-                        .transition(.opacity)
-                        .padding(.top, -4)
-                        .padding(.trailing, -4)
-                }
-            }
+    private var roleIndicator: some View {
+        let color: Color = message.role == .assistant
+            ? workspace.preferences.theme.accentColor
+            : workspace.preferences.theme.foregroundColor.opacity(0.3)
+        return Rectangle()
+            .fill(color)
+            .frame(width: 2)
+            .clipShape(Capsule())
+    }
+
+    private var roleLabel: some View {
+        let theme = workspace.preferences.theme
+        let label = message.role == .assistant ? "Assistant" : "You"
+        return Text(label)
+            .font(.system(size: Typography.xs, weight: .semibold))
+            .foregroundStyle(message.role == .assistant
+                ? theme.accentColor.opacity(0.8)
+                : theme.foregroundColor.opacity(0.5))
     }
 
     private var timestampText: String {
@@ -684,39 +749,20 @@ struct ChatBubble: View {
         }
     }
 
-    private var roleBadge: some View {
-        let theme = workspace.preferences.theme
-        let icon = message.role == .assistant ? "sparkles" : "person.fill"
-        let tint = message.role == .assistant
-            ? theme.accentColor
-            : theme.foregroundColor.opacity(0.75)
-        return Image(systemName: icon)
-            .font(.system(size: Typography.xs, weight: .bold))
-            .foregroundStyle(tint)
-            .frame(width: 18, height: 18)
-            .background(
-                Circle()
-                    .fill(theme.panelBackgroundColor)
-            )
-            .overlay(
-                Circle()
-                    .strokeBorder(theme.panelBorderColor)
-            )
-            .accessibilityHidden(true)
-    }
-
     @ViewBuilder
     private var bubbleContent: some View {
         switch message.kind {
         case .text(let text):
             VStack(alignment: .leading, spacing: 6) {
                 if !text.isEmpty || message.isStreaming {
+                    let displayText = message.isStreaming ? text + " ..." : text
                     LinkifiedText(
                         workspace: workspace,
-                        text: message.isStreaming ? text + " ..." : text,
+                        text: displayText,
                         font: .system(size: Typography.base, weight: .regular),
                         baseColor: .primary,
-                        selectionEnabled: true
+                        selectionEnabled: true,
+                        linkifyEnabled: !message.isStreaming
                     )
                 }
 
@@ -762,7 +808,9 @@ struct ChatBubble: View {
                         text: info.output,
                         font: .system(size: Typography.base, weight: .regular, design: .monospaced),
                         baseColor: .primary,
-                        selectionEnabled: true
+                        selectionEnabled: true,
+                        linkifyEnabled: info.status != .running,
+                        maxLinkifyLength: 8000
                     )
                 }
                 if let exitCode = info.exitCode {
@@ -880,6 +928,7 @@ struct MessageActionBar: View {
     let message: ChatMessage
     let workspace: WorkspaceState
     @State private var showJJRevertConfirm = false
+    @State private var revertInfo: WorkspaceState.JJRevertActionInfo?
 
     var body: some View {
         let canFork = workspace.canForkMessage(message)
@@ -887,7 +936,6 @@ struct MessageActionBar: View {
         let canRetry = workspace.canRetryMessage(message)
         let canEdit = workspace.canEditMessage(message)
         let canRollback = workspace.canRollbackToMessage(message)
-        let revertInfo = workspace.jjRevertActionInfo(message)
         let canRevertJJ = revertInfo != nil
         let hasAny = canFork || canCopy || canRetry || canEdit || canRollback || canRevertJJ
 
@@ -902,6 +950,9 @@ struct MessageActionBar: View {
                     revertInfo: revertInfo
                 )
             }
+        }
+        .task(id: message.id) {
+            revertInfo = await workspace.jjRevertActionInfo(message)
         }
     }
 
@@ -1001,10 +1052,14 @@ struct MessageActionBar: View {
             }
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.vertical, 3)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.black.opacity(0.2))
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.black.opacity(0.3))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
         )
     }
 }
@@ -1176,12 +1231,19 @@ struct DiffStatusBadge: View {
 
 struct ThinkingRow: View {
     var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Thinking...")
-                .font(.system(size: Typography.s, weight: .medium))
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 8) {
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(width: 2)
+                .clipShape(Capsule())
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Thinking...")
+                    .font(.system(size: Typography.s, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(Typography.textMuted))
+            }
+            .padding(.vertical, 8)
             Spacer()
         }
         .padding(.vertical, 4)

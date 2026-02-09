@@ -79,25 +79,30 @@ struct FileTreeRow: View {
     private var folderRow: some View {
         VStack(alignment: .leading, spacing: 0) {
             rowChrome {
-                HStack(spacing: 6) {
+                let theme = workspace.preferences.theme
+                HStack(spacing: 5) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: Typography.s, weight: .bold))
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(theme.mutedForegroundColor.opacity(0.5))
                         .rotationEffect(isExpanded ? .degrees(90) : .zero)
                         .animation(.easeInOut(duration: 0.15), value: isExpanded)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 16, height: 16)
                     Image(systemName: isExpanded ? "folder.fill" : "folder")
-                        .foregroundStyle(.blue)
-                        .font(.system(size: Typography.base))
+                        .foregroundStyle(theme.accentColor.opacity(0.6))
+                        .font(.system(size: Typography.s))
                     Text(item.name)
-                        .font(.system(size: Typography.base))
+                        .font(.system(size: Typography.s, weight: .medium))
+                        .foregroundStyle(theme.foregroundColor.opacity(0.85))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
                 }
-                .padding(.vertical, 2)
+                .frame(height: 26)
                 .contentShape(Rectangle())
-                .background(isHovered ? workspace.preferences.theme.selectionBackgroundColor.opacity(0.3) : Color.clear)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(isHovered ? theme.selectionBackgroundColor.opacity(0.4) : Color.clear)
+                )
                 .onTapGesture {
                     if !isExpanded {
                         workspace.expandFolder(item)
@@ -121,26 +126,40 @@ struct FileTreeRow: View {
 
     private var fileLabel: some View {
         let isModified = workspace.isFileModified(item.id)
-        let dotColor = workspace.selectedFileURL == item.id
-            ? workspace.preferences.theme.tabSelectedForegroundColor
-            : workspace.preferences.theme.accentColor
+        let isSelected = workspace.selectedFileURL == item.id
+        let theme = workspace.preferences.theme
 
         return HStack(spacing: 6) {
             Image(systemName: iconForFile(item.name))
-                .foregroundStyle(colorForFile(item.name)?.opacity(0.8) ?? .secondary)
-                .font(.system(size: Typography.base))
+                .foregroundStyle(colorForFile(item.name)?.opacity(0.65) ?? theme.mutedForegroundColor)
+                .font(.system(size: Typography.s))
             Text(item.name)
-                .font(.system(size: Typography.base))
+                .font(.system(size: Typography.s))
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .foregroundStyle(isSelected ? theme.foregroundColor : theme.foregroundColor.opacity(0.8))
             if isModified {
                 Circle()
-                    .fill(dotColor)
-                    .frame(width: 6, height: 6)
+                    .fill(theme.accentColor.opacity(0.7))
+                    .frame(width: 5, height: 5)
                     .accessibilityLabel("Unsaved changes")
             }
             Spacer()
         }
+        .frame(height: 26)
+        .padding(.vertical, 1)
+        .background(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(isHovered && !isSelected ? theme.selectionBackgroundColor.opacity(0.5) : Color.clear)
+        )
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Capsule()
+                    .fill(theme.accentColor)
+                    .frame(width: 2, height: 14)
+            }
+        }
+        .onHover { isHovered = $0 }
     }
 
     private var fileContextMenu: some View {

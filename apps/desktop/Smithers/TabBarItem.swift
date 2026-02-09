@@ -15,59 +15,56 @@ struct TabBarItem: View {
     var body: some View {
         let helpText = isModified ? "\(subtitle)\nUnsaved changes" : subtitle
         let fileColor = colorForFile(title)
-        let showClose = isModified ? isHovered : (isHovered || isSelected)
+        let showClose = isModified ? isHovered : isHovered
         let showDot = isModified && !isHovered
-        let borderColor = isDropTarget
-            ? theme.accentColor
-            : (isSelected ? theme.tabBorderColor : theme.tabBorderColor.opacity(0.6))
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: Typography.base))
-                .foregroundStyle(fileColor?.opacity(0.8) ?? theme.mutedForegroundColor)
+                .font(.system(size: Typography.s))
+                .foregroundStyle(fileColor?.opacity(0.7) ?? theme.mutedForegroundColor)
             Text(title)
-                .font(.system(size: Typography.base, weight: .medium))
+                .font(.system(size: Typography.s, weight: isSelected ? .semibold : .regular))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(isSelected ? theme.tabSelectedForegroundColor : theme.tabForegroundColor)
             ZStack {
                 if showDot {
-                    let dotColor = isSelected ? theme.tabSelectedForegroundColor : theme.accentColor
                     Circle()
-                        .fill(dotColor)
-                        .frame(width: 7, height: 7)
+                        .fill(theme.accentColor.opacity(0.8))
+                        .frame(width: 6, height: 6)
                         .accessibilityLabel("Unsaved changes")
                         .transition(.opacity)
                 }
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: Typography.xs, weight: .bold))
-                        .foregroundStyle(theme.mutedForegroundColor)
-                        .padding(4)
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(theme.mutedForegroundColor.opacity(0.6))
+                        .padding(3)
                 }
                 .buttonStyle(.plain)
                 .opacity(showClose ? 1 : 0)
                 .allowsHitTesting(showClose)
                 .accessibilityLabel("Close \(title)")
             }
-            .frame(width: 18, height: 18)
+            .frame(width: 16, height: 16)
             .animation(.easeInOut(duration: 0.12), value: showClose)
             .animation(.easeInOut(duration: 0.12), value: showDot)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isSelected ? theme.tabSelectedBackgroundColor : (isHovered ? theme.tabSelectedBackgroundColor.opacity(0.5) : Color.clear))
+                .fill(isSelected ? theme.tabSelectedBackgroundColor : (isHovered ? theme.tabSelectedBackgroundColor.opacity(0.4) : Color.clear))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(borderColor)
+                .strokeBorder(isDropTarget ? theme.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
         )
         .overlay(alignment: .bottom) {
             if isSelected {
-                Rectangle()
+                Capsule()
                     .fill(theme.accentColor)
-                    .frame(height: 2)
+                    .frame(width: 16, height: 2)
+                    .padding(.bottom, 1)
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
