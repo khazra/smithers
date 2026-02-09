@@ -57,6 +57,9 @@ export type ChatSessionSummary = {
   createdAtMs: number;
   updatedAtMs: number;
   messageCount: number;
+  forkId?: string | null;
+  forkSourceSessionId?: string | null;
+  forkCodeMode?: ForkCodeMode | null;
 };
 
 export type ChatSessionDTO = {
@@ -65,6 +68,7 @@ export type ChatSessionDTO = {
   createdAtMs: number;
   updatedAtMs: number;
   messages: AppMessageDTO[];
+  fork?: ForkRecordDTO | null;
 };
 
 export type AgentStreamEventDTO = {
@@ -81,6 +85,35 @@ export type WorkflowRef = {
 export type WorkspaceStateDTO = {
   root: string | null;
   workflows: WorkflowRef[];
+};
+
+export type ForkPoint = "before" | "after";
+export type ForkCodeMode = "context_only" | "shared" | "sandboxed";
+
+export type ForkRecordDTO = {
+  forkId: string;
+  sessionId: string;
+  sourceSessionId: string;
+  messageSeq: number;
+  forkPoint: ForkPoint;
+  codeMode: ForkCodeMode;
+  snapshotId?: string | null;
+  sandboxRoot?: string | null;
+  sourceRoot?: string | null;
+  createdAtMs: number;
+};
+
+export type WorkspaceStatusDTO = {
+  activeForkId?: string | null;
+  activeRoot?: string | null;
+  codeStateRef?: string | null;
+  codeStateType?: "fs" | "jj" | null;
+  isDirty?: boolean;
+};
+
+export type ForkDiffDTO = {
+  path: string;
+  status: "added" | "modified" | "deleted";
 };
 
 export type RunStatus =
@@ -236,6 +269,10 @@ export type SettingsDTO = {
     workflowPanel: { isOpen: boolean; width: number };
     artifactsPanelOpen: boolean;
     lastWorkspaceRoot: string | null;
+    forks: {
+      defaultIncludeCode: boolean;
+      defaultCodeMode: ForkCodeMode;
+    };
   };
   agent: AgentSettings;
   smithers: SmithersSettings;
@@ -260,6 +297,43 @@ export type RpcProcedures = {
   getChatSession: {
     params: { sessionId: string };
     response: ChatSessionDTO;
+  };
+  getSessionFork: {
+    params: { sessionId: string };
+    response: { fork: ForkRecordDTO | null };
+  };
+  listForks: {
+    params: { sessionId: string };
+    response: { forks: ForkRecordDTO[] };
+  };
+  forkChat: {
+    params: {
+      sessionId: string;
+      messageSeq: number;
+      forkPoint: ForkPoint;
+      includeCode: boolean;
+      codeMode: ForkCodeMode;
+      fanout?: number;
+      snapshotStrategy?: "nearest" | "capture";
+    };
+    response: { sessionIds: string[]; forkIds: string[] };
+  };
+  activateCodeState: {
+    params: { sessionId: string; force?: boolean };
+    response: WorkspaceStatusDTO;
+  };
+  previewForkMerge: {
+    params: { forkId: string; targetSessionId?: string };
+    response: { changes: ForkDiffDTO[] };
+  };
+  mergeFork: {
+    params: {
+      forkId: string;
+      targetSessionId?: string;
+      mode: "diff_apply" | "vcs";
+      files?: string[];
+    };
+    response: { ok: true; appliedFiles?: string[]; conflicts?: string[] };
   };
   sendChatMessage: {
     params: {
@@ -313,6 +387,7 @@ export type RpcProcedures = {
 
   getSettings: { params: {}; response: SettingsDTO };
   setSettings: { params: { patch: DeepPartial<SettingsDTO> }; response: SettingsDTO };
+  getWorkspaceStatus: { params: {}; response: WorkspaceStatusDTO };
   getSecretStatus: { params: {}; response: SecretStatusDTO };
   setSecret: { params: { key: SecretKey; value: string }; response: { ok: true } };
   clearSecret: { params: { key: SecretKey }; response: { ok: true } };
@@ -326,5 +401,7 @@ export type RpcMessages = {
   workflowEvent: SmithersEventDTO & { seq: number };
   workflowFrame: FrameSnapshotDTO;
   workspaceState: WorkspaceStateDTO;
+  workspaceStatus: WorkspaceStatusDTO;
   toast: { level: "info" | "warning" | "error"; message: string };
+  mergeProgress: { mergeId: string; status: string; conflicts?: string[] };
 };
