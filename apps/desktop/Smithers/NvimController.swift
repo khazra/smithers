@@ -175,6 +175,7 @@ final class NvimController {
     }
 
     private func handleGridMetricsChange(_ metrics: GhosttyGridMetrics) {
+        workspace?.handleNvimGridMetrics(metrics)
         let size = (columns: metrics.columns, rows: metrics.rows)
         if uiAttached {
             if lastUiSize?.columns != size.columns || lastUiSize?.rows != size.rows {
@@ -205,6 +206,9 @@ final class NvimController {
             "ext_multigrid": .bool(true),
             "ext_linegrid": .bool(true),
             "ext_hlstate": .bool(true),
+            "ext_cmdline": .bool(true),
+            "ext_popupmenu": .bool(true),
+            "ext_messages": .bool(true),
         ]
         _ = try await rpc.request(
             "nvim_ui_attach",
