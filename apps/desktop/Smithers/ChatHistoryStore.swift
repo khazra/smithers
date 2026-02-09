@@ -92,7 +92,7 @@ private struct ChatHistoryMessage: Codable {
 
     func asChatMessage() -> ChatMessage {
         let restoredImages = images.compactMap { $0.asChatImage() }
-        ChatMessage(
+        return ChatMessage(
             role: role.asChatRole(),
             kind: kind.asChatKind(),
             images: restoredImages,
