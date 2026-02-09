@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Foundation
 import Dispatch
 import STTextView
 import QuartzCore
@@ -24,6 +25,9 @@ struct CodeEditor: NSViewRepresentable {
     var fileURL: URL?
     var theme: AppTheme
     var font: NSFont
+    var lineSpacing: Double
+    var characterSpacing: Double
+    var ligaturesEnabled: Bool
     var cursorStyle: EditorCursorShape = .bar
     var scrollbarMode: ScrollbarVisibilityMode
     var showsLineNumbers: Bool
@@ -34,9 +38,12 @@ struct CodeEditor: NSViewRepresentable {
     var saveViewState: (URL, CGPoint, NSRange) -> Void
     var loadViewState: (URL) -> EditorViewState?
     var onCursorMove: (Int, Int) -> Void
+    var onTextEdit: ((Int, Int) -> Void)?
+    var completionProvider: ((EditorCompletionRequest, @escaping @MainActor (String) -> Void) async -> String?)?
+    var cancelCompletionRequest: (() -> Void)?
 
     func makeNSView(context: Context) -> ScrollbarHostingView {
-        let scrollView = STTextView.scrollableTextView()
+        let scrollView = MultiCursorTextView.scrollableTextView()
         let textView = scrollView.documentView as! STTextView
 
         textView.font = font
@@ -76,12 +83,14 @@ struct CodeEditor: NSViewRepresentable {
             textView: textView,
             theme: theme,
             font: font,
+            characterSpacing: characterSpacing,
             isEnabled: showsIndentGuides,
             coordinator: context.coordinator
         )
         context.coordinator.loadFile(text: text, language: language, fileURL: fileURL, textView: textView)
         context.coordinator.appliedTheme = theme
         context.coordinator.appliedFont = font
+        context.coordinator.appliedSignature = textLayoutSignature
 
         return ScrollbarHostingView(contentView: scrollView, scrollbarView: scrollbarView)
     }
@@ -114,10 +123,12 @@ struct CodeEditor: NSViewRepresentable {
             textView: textView,
             theme: theme,
             font: font,
+            characterSpacing: characterSpacing,
             isEnabled: showsIndentGuides,
             coordinator: coord
         )
         coord.refreshCursorAppearance(textView: textView)
+        coord.updateGhostView(textView: textView)
 
         if coord.currentFileURL != fileURL {
             coord.saveViewState(for: coord.currentFileURL, textView: textView, scrollView: scrollView)
@@ -129,9 +140,11 @@ struct CodeEditor: NSViewRepresentable {
             return
         }
 
-        if let appliedFont = coord.appliedFont, appliedFont != font {
+        let signature = textLayoutSignature
+        if coord.appliedSignature != signature {
             coord.saveViewState(for: coord.currentFileURL, textView: textView, scrollView: scrollView)
             coord.appliedFont = font
+            coord.appliedSignature = signature
             coord.resetHighlighterCache()
             coord.loadFile(text: text, language: language, fileURL: fileURL, textView: textView)
             coord.restoreViewState(for: fileURL, textView: textView, scrollView: scrollView)
@@ -140,6 +153,7 @@ struct CodeEditor: NSViewRepresentable {
                 textView: textView,
                 theme: theme,
                 font: font,
+                characterSpacing: characterSpacing,
                 isEnabled: showsIndentGuides,
                 coordinator: coord
             )
@@ -161,6 +175,44 @@ struct CodeEditor: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
+    }
+
+    private var textLayoutSignature: String {
+        Self.layoutSignature(
+            font: font,
+            lineSpacing: lineSpacing,
+            characterSpacing: characterSpacing,
+            ligaturesEnabled: ligaturesEnabled
+        )
+    }
+
+    private func baseParagraphStyle() -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = CGFloat(lineSpacing)
+        return style
+    }
+
+    private func baseTextAttributes() -> [NSAttributedString.Key: Any] {
+        [
+            .foregroundColor: theme.foreground,
+            .font: font,
+            .paragraphStyle: baseParagraphStyle(),
+            .kern: CGFloat(characterSpacing),
+            .ligature: ligaturesEnabled ? 1 : 0,
+        ]
+    }
+
+    private static func layoutSignature(
+        font: NSFont,
+        lineSpacing: Double,
+        characterSpacing: Double,
+        ligaturesEnabled: Bool
+    ) -> String {
+        let size = String(format: "%.2f", font.pointSize)
+        let line = String(format: "%.2f", lineSpacing)
+        let tracking = String(format: "%.2f", characterSpacing)
+        let ligatures = ligaturesEnabled ? "1" : "0"
+        return "\(font.fontName)-\(size)-ls\(line)-cs\(tracking)-lig\(ligatures)"
     }
 
     private func applySelectionRequest(textView: STTextView, scrollView: NSScrollView) {
@@ -295,15 +347,18 @@ struct CodeEditor: NSViewRepresentable {
         max(2, round(font.pointSize * 0.12))
     }
 
-    private static func indentGuideWidth(for font: NSFont) -> CGFloat {
+    private static func indentGuideWidth(for font: NSFont, characterSpacing: Double) -> CGFloat {
         let spaceWidth = (" " as NSString).size(withAttributes: [.font: font]).width
-        return max(12, round(spaceWidth * 4))
+        let kern = CGFloat(characterSpacing)
+        let width = (spaceWidth * 4) + (kern * 3)
+        return max(12, round(width))
     }
 
     private func updateIndentGuides(
         textView: STTextView,
         theme: AppTheme,
         font: NSFont,
+        characterSpacing: Double,
         isEnabled: Bool,
         coordinator: Coordinator
     ) {
@@ -314,7 +369,7 @@ struct CodeEditor: NSViewRepresentable {
             }
             return
         }
-        let indentWidth = Self.indentGuideWidth(for: font)
+        let indentWidth = Self.indentGuideWidth(for: font, characterSpacing: characterSpacing)
         let lineColor = theme.foreground.withAlphaComponent(0.06)
         if let guidesView = coordinator.indentGuidesView {
             guidesView.indentWidth = indentWidth
@@ -360,9 +415,8 @@ struct CodeEditor: NSViewRepresentable {
             cache.removeAllObjects()
         }
 
-        func invalidateIfNeeded(textView: STTextView, font: NSFont) {
+        func invalidateIfNeeded(textView: STTextView, signature: String) {
             let width = textView.bounds.width
-            let signature = "\(font.fontName)-\(font.pointSize)"
             if abs(width - lastLayoutWidth) > 0.5 || signature != lastFontSignature {
                 invalidate()
                 lastLayoutWidth = width
@@ -398,10 +452,9 @@ struct CodeEditor: NSViewRepresentable {
         private weak var lineNumberView: STLineNumberRulerView?
         private weak var scrollbarView: ScrollbarOverlayView?
         fileprivate weak var indentGuidesView: IndentGuidesView?
-        private weak var cursorView: EditorCursorView?
+        private weak var cursorView: EditorCursorGroupView?
         private var cursorObservers: [NSObjectProtocol] = []
         private weak var cursorWindow: NSWindow?
-        private var lastCursorRect: NSRect?
         private var scrollObserver: Any?
         private var magnificationRecognizer: NSMagnificationGestureRecognizer?
         private var highlighterCache: [String: TreeSitterHighlighter] = [:]
@@ -409,12 +462,24 @@ struct CodeEditor: NSViewRepresentable {
         fileprivate var lastAppliedText: String = ""
         var appliedTheme: AppTheme?
         var appliedFont: NSFont?
+        var appliedSignature: String?
         private var bracketHighlightRanges: [NSRange] = []
+        private weak var ghostTextView: GhostTextOverlayView?
+        private var ghostText: String = ""
+        private var ghostAnchor: Int?
+        private var completionWorkItem: DispatchWorkItem?
+        private var completionTask: Task<Void, Never>?
+        private var completionRequestID: Int = 0
+        private var suppressNextCompletionRequest = false
+        private var suppressSelectionCancel = false
+        private var isApplyingCompletion = false
+        private let completionDebounceInterval: TimeInterval = 0.3
         private var pinchStartFontSize: Double = 0
         private var pinchStartFont: NSFont?
         private var liveFontSize: Double?
         private var isPinching = false
         private let glyphFrameCache = GlyphFrameCache()
+        private var isNormalizingSelections = false
 
         init(parent: CodeEditor) {
             self.parent = parent
@@ -426,6 +491,8 @@ struct CodeEditor: NSViewRepresentable {
             }
             cursorObservers.forEach { NotificationCenter.default.removeObserver($0) }
             cursorObservers.removeAll()
+            completionTask?.cancel()
+            completionWorkItem?.cancel()
         }
 
         func attach(scrollView: NSScrollView, textView: STTextView, scrollbar: ScrollbarOverlayView) {
@@ -461,6 +528,8 @@ struct CodeEditor: NSViewRepresentable {
             configureScrollbarActions(scrollView: scrollView, scrollbar: scrollbar)
             if let textView = self.textView, let scrollView = self.scrollView {
                 updateScrollMetrics(textView: textView, scrollView: scrollView)
+                ensureGhostTextView(textView: textView)
+                updateGhostView(textView: textView)
                 ensureCursorView(textView: textView)
             }
         }
@@ -469,13 +538,21 @@ struct CodeEditor: NSViewRepresentable {
             currentFileURL = fileURL
             ignoreNextChange = true
             appliedFont = parent.font
+            appliedSignature = parent.textLayoutSignature
             setTextViewContent(textView, text: text)
+            resetCompletionState(textView: textView)
 
             if let language {
                 if let cached = highlighterCache[language.name] {
                     highlighter = cached
                 } else {
-                    let h = TreeSitterHighlighter(language: language, font: parent.font)
+                    let h = TreeSitterHighlighter(
+                        language: language,
+                        font: parent.font,
+                        lineSpacing: parent.lineSpacing,
+                        characterSpacing: parent.characterSpacing,
+                        ligaturesEnabled: parent.ligaturesEnabled
+                    )
                     highlighterCache[language.name] = h
                     highlighter = h
                 }
@@ -517,7 +594,7 @@ struct CodeEditor: NSViewRepresentable {
                     offset: scrollY
                 )
             )
-            glyphFrameCache.invalidateIfNeeded(textView: textView, font: parent.font)
+            glyphFrameCache.invalidateIfNeeded(textView: textView, signature: parent.textLayoutSignature)
         }
 
         private func configureScrollbarActions(scrollView: NSScrollView, scrollbar: ScrollbarOverlayView) {
@@ -609,14 +686,15 @@ struct CodeEditor: NSViewRepresentable {
 
         private func ensureCursorView(textView: STTextView) {
             if cursorView?.superview !== textView {
-                let view = EditorCursorView()
+                let view = EditorCursorGroupView()
                 view.cursorColor = parent.theme.foreground
                 view.outlineColor = parent.theme.foreground.withAlphaComponent(0.6)
                 view.showsOutlineWhenInactive = true
                 view.setVisible(false)
+                view.frame = textView.bounds
+                view.autoresizingMask = [.width, .height]
                 textView.addSubview(view, positioned: .above, relativeTo: nil)
                 cursorView = view
-                lastCursorRect = nil
             }
             updateCursorWindowObservation(for: textView)
         }
@@ -632,18 +710,11 @@ struct CodeEditor: NSViewRepresentable {
         func refreshCursorPosition(textView: STTextView, selection: NSRange? = nil, restartBlink: Bool) {
             ensureCursorView(textView: textView)
             guard let cursorView else { return }
-            let selection = selection ?? textView.selectedRange()
-
-            guard selection.length == 0 else {
+            let selections = textView.textLayoutManager.textSelections
+            guard !selections.isEmpty else {
                 cursorView.setVisible(false)
                 return
             }
-
-            guard let caretRect = caretRect(for: textView, location: selection.location) else {
-                cursorView.setVisible(false)
-                return
-            }
-
             let isFirstResponder = textView.window?.firstResponder === textView
             guard isFirstResponder else {
                 cursorView.setVisible(false)
@@ -653,25 +724,45 @@ struct CodeEditor: NSViewRepresentable {
             let windowIsKey = textView.window?.isKeyWindow ?? true
             cursorView.isActive = windowIsKey && isFirstResponder
             cursorView.blinkEnabled = cursorView.isActive
-            cursorView.setVisible(true)
 
             let font = parent.font
-            let lineHeight = max(caretRect.height, ceil(font.ascender - font.descender + font.leading))
+            let baseLineHeight = ceil(font.ascender - font.descender + font.leading + CGFloat(parent.lineSpacing))
             let cursorWidth = CodeEditor.cursorWidth(for: font)
-            let cellWidth = cursorCellWidth(textView: textView, font: font, location: selection.location)
             let shape = parent.cursorStyle
-            let targetRect = cursorRect(
-                caretRect: caretRect,
-                shape: shape,
-                cursorWidth: cursorWidth,
-                cellWidth: cellWidth,
-                lineHeight: lineHeight,
-                isFlipped: textView.isFlipped
-            )
+            var targetRects: [NSRect] = []
 
-            let motion = cursorMotionKind(from: lastCursorRect, to: targetRect, lineHeight: lineHeight)
-            cursorView.move(to: targetRect, motion: motion, restartBlink: restartBlink)
-            lastCursorRect = targetRect
+            for selection in selections {
+                for textRange in selection.textRanges {
+                    let nsRange = NSRange(textRange, in: textView.textContentManager)
+                    let insertionLocation = selection.affinity == .upstream
+                        ? nsRange.location
+                        : nsRange.location + nsRange.length
+                    guard let caretRect = caretRect(for: textView, location: insertionLocation) else { continue }
+                    let lineHeight = max(caretRect.height, baseLineHeight)
+                    let cellWidth = cursorCellWidth(
+                        textView: textView,
+                        font: font,
+                        characterSpacing: parent.characterSpacing,
+                        location: insertionLocation
+                    )
+                    let targetRect = cursorRect(
+                        caretRect: caretRect,
+                        shape: shape,
+                        cursorWidth: cursorWidth,
+                        cellWidth: cellWidth,
+                        lineHeight: lineHeight,
+                        isFlipped: textView.isFlipped
+                    )
+                    targetRects.append(targetRect)
+                }
+            }
+
+            if targetRects.isEmpty {
+                cursorView.setVisible(false)
+                return
+            }
+
+            cursorView.update(rects: targetRects, lineHeight: baseLineHeight, restartBlink: restartBlink)
         }
 
         private func updateCursorWindowObservation(for textView: STTextView) {
@@ -714,7 +805,12 @@ struct CodeEditor: NSViewRepresentable {
             return nil
         }
 
-        private func cursorCellWidth(textView: STTextView, font: NSFont, location: Int) -> CGFloat {
+        private func cursorCellWidth(
+            textView: STTextView,
+            font: NSFont,
+            characterSpacing: Double,
+            location: Int
+        ) -> CGFloat {
             let length = textView.attributedString().length
             if length > 0 {
                 let clamped = max(0, min(location, max(0, length - 1)))
@@ -724,7 +820,9 @@ struct CodeEditor: NSViewRepresentable {
                 }
             }
             let sample = "M" as NSString
-            return max(1, round(sample.size(withAttributes: [.font: font]).width))
+            let baseWidth = sample.size(withAttributes: [.font: font]).width
+            let width = baseWidth + CGFloat(characterSpacing)
+            return max(1, round(width))
         }
 
         private func cursorRect(
@@ -774,11 +872,9 @@ struct CodeEditor: NSViewRepresentable {
         }
 
         func setTextViewContent(_ textView: STTextView, text: String) {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .foregroundColor: parent.theme.foreground,
-                .font: parent.font,
-            ]
+            let attrs = parent.baseTextAttributes()
             textView.font = parent.font
+            textView.defaultParagraphStyle = parent.baseParagraphStyle()
             textView.setAttributedString(NSAttributedString(string: text, attributes: attrs))
             textView.typingAttributes = attrs
             lastAppliedText = text
@@ -801,8 +897,25 @@ struct CodeEditor: NSViewRepresentable {
             lastAppliedText = newText
             glyphFrameCache.invalidate()
             scheduleHighlight(textView: textView, text: newText, delay: 0.25)
+            suppressSelectionCancel = true
+            DispatchQueue.main.async { [weak self] in
+                self?.suppressSelectionCancel = false
+            }
             if let scrollView {
                 updateScrollMetrics(textView: textView, scrollView: scrollView)
+            }
+            if let onTextEdit = parent.onTextEdit {
+                let nsText = newText as NSString
+                let insertionLocation = textView.selectedRange().location
+                let clamped = min(max(0, insertionLocation), nsText.length)
+                let position = lineAndColumn(in: nsText, location: clamped)
+                onTextEdit(position.line, position.column)
+            }
+            updateGhostView(textView: textView)
+            if suppressNextCompletionRequest {
+                suppressNextCompletionRequest = false
+            } else {
+                scheduleCompletion(textView: textView)
             }
             DispatchQueue.main.async { [weak self, weak textView] in
                 guard let self, let textView else { return }
@@ -812,12 +925,23 @@ struct CodeEditor: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? STTextView else { return }
+            normalizeSelectionsIfNeeded(textView: textView)
             let selection = textView.selectedRange()
+            if !suppressSelectionCancel {
+                cancelPendingCompletion()
+                cancelInFlightCompletion()
+            }
+            if let ghostAnchor {
+                if selection.length > 0 || selection.location != ghostAnchor {
+                    clearGhostText(textView: textView)
+                }
+            }
             updateCursorPosition(textView: textView, selection: selection)
             if let scrollView {
                 saveViewState(for: currentFileURL, textView: textView, scrollView: scrollView)
             }
             updateBracketHighlights(textView: textView, selection: selection)
+            updateGhostView(textView: textView)
             refreshCursorPosition(textView: textView, selection: selection, restartBlink: true)
         }
 
@@ -831,14 +955,298 @@ struct CodeEditor: NSViewRepresentable {
             refreshCursorPosition(textView: textView, restartBlink: false)
         }
 
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            guard let textView = textView as? STTextView else { return false }
+            if commandSelector == #selector(NSResponder.insertTab(_:)) {
+                if !ghostText.isEmpty {
+                    applyGhostText(textView: textView)
+                    return true
+                }
+                return false
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                if !ghostText.isEmpty {
+                    clearGhostText(textView: textView)
+                    return true
+                }
+                cancelPendingCompletion()
+                cancelInFlightCompletion()
+                return false
+            }
+            if isNavigationCommand(commandSelector) {
+                if !ghostText.isEmpty {
+                    clearGhostText(textView: textView)
+                }
+                cancelPendingCompletion()
+                cancelInFlightCompletion()
+                return false
+            }
+            return false
+        }
+
+        func textView(
+            _ textView: NSTextView,
+            shouldChangeTextIn affectedCharRange: NSRange,
+            replacementString: String?
+        ) -> Bool {
+            guard let textView = textView as? STTextView else { return true }
+            if isApplyingCompletion {
+                return true
+            }
+            cancelPendingCompletion()
+            cancelInFlightCompletion()
+            guard !ghostText.isEmpty else { return true }
+            guard let replacementString, !replacementString.isEmpty, affectedCharRange.length == 0 else {
+                clearGhostText(textView: textView)
+                return true
+            }
+            if ghostText.hasPrefix(replacementString) {
+                let dropCount = replacementString.count
+                ghostText = String(ghostText.dropFirst(dropCount))
+                let utf16Count = (replacementString as NSString).length
+                ghostAnchor = affectedCharRange.location + utf16Count
+                suppressNextCompletionRequest = true
+                if ghostText.isEmpty {
+                    clearGhostText(textView: textView)
+                }
+                return true
+            }
+            clearGhostText(textView: textView)
+            return true
+        }
+
         private func updateCursorPosition(textView: STTextView, selection: NSRange) {
             let nsText = textView.attributedString().string as NSString
-            let clampedLocation = min(max(0, selection.location), nsText.length)
-            let lineRange = nsText.lineRange(for: NSRange(location: clampedLocation, length: 0))
-            let prefix = nsText.substring(to: clampedLocation)
+            let insertionLocation = selection.location + selection.length
+            let clampedLocation = min(max(0, insertionLocation), nsText.length)
+            let position = lineAndColumn(in: nsText, location: clampedLocation)
+            parent.onCursorMove(position.line, position.column)
+        }
+
+        private func lineAndColumn(in text: NSString, location: Int) -> (line: Int, column: Int) {
+            let clampedLocation = min(max(0, location), text.length)
+            let lineRange = text.lineRange(for: NSRange(location: clampedLocation, length: 0))
+            let prefix = text.substring(to: clampedLocation)
             let line = prefix.components(separatedBy: "\n").count
             let column = clampedLocation - lineRange.location + 1
-            parent.onCursorMove(line, column)
+            return (line, column)
+        }
+
+        private func normalizeSelectionsIfNeeded(textView: STTextView) {
+            guard !isNormalizingSelections else { return }
+            let selections = textView.textLayoutManager.textSelections
+            let totalRanges = selections.reduce(0) { $0 + $1.textRanges.count }
+            guard totalRanges > 1 else { return }
+
+            struct RangeKey: Hashable {
+                let location: Int
+                let length: Int
+            }
+
+            var seenEmpty: Set<Int> = []
+            var seenRanges: Set<RangeKey> = []
+            var uniqueSelections: [NSTextSelection] = []
+
+            for selection in selections.reversed() {
+                guard let textRange = selection.textRanges.last else { continue }
+                let nsRange = NSRange(textRange, in: textView.textContentManager)
+                if nsRange.length == 0 {
+                    if seenEmpty.contains(nsRange.location) { continue }
+                    seenEmpty.insert(nsRange.location)
+                } else {
+                    let key = RangeKey(location: nsRange.location, length: nsRange.length)
+                    if seenRanges.contains(key) { continue }
+                    seenRanges.insert(key)
+                }
+                uniqueSelections.append(selection)
+            }
+
+            uniqueSelections.reverse()
+            guard uniqueSelections.count != selections.count else { return }
+
+            isNormalizingSelections = true
+            textView.textLayoutManager.textSelections = uniqueSelections
+            textView.needsLayout = true
+            textView.needsDisplay = true
+            isNormalizingSelections = false
+        }
+
+        private func ensureGhostTextView(textView: STTextView) {
+            if ghostTextView?.superview !== textView {
+                let view = GhostTextOverlayView(frame: textView.bounds)
+                view.autoresizingMask = [.width, .height]
+                view.textColor = ghostTextColor()
+                view.font = parent.font
+                view.lineSpacing = CGFloat(parent.lineSpacing)
+                view.characterSpacing = CGFloat(parent.characterSpacing)
+                view.ligaturesEnabled = parent.ligaturesEnabled
+                textView.addSubview(view, positioned: .above, relativeTo: nil)
+                ghostTextView = view
+            }
+        }
+
+        func updateGhostView(textView: STTextView) {
+            guard let ghostTextView else { return }
+            guard !ghostText.isEmpty, let anchor = ghostAnchor else {
+                ghostTextView.ghostText = ""
+                ghostTextView.setVisible(false)
+                return
+            }
+            guard let caretRect = caretRect(for: textView, location: anchor) else {
+                ghostTextView.setVisible(false)
+                return
+            }
+            ghostTextView.ghostText = ghostText
+            ghostTextView.caretRect = caretRect
+            ghostTextView.lineStartX = lineStartX(for: textView, location: anchor)
+            ghostTextView.font = parent.font
+            ghostTextView.lineSpacing = CGFloat(parent.lineSpacing)
+            ghostTextView.characterSpacing = CGFloat(parent.characterSpacing)
+            ghostTextView.ligaturesEnabled = parent.ligaturesEnabled
+            ghostTextView.textColor = ghostTextColor()
+            ghostTextView.setVisible(true)
+        }
+
+        private func ghostTextColor() -> NSColor {
+            parent.theme.foreground.withAlphaComponent(0.35)
+        }
+
+        private func lineStartX(for textView: STTextView, location: Int) -> CGFloat {
+            let text = textView.attributedString().string as NSString
+            let clamped = min(max(0, location), text.length)
+            let lineRange = text.lineRange(for: NSRange(location: clamped, length: 0))
+            if let rect = caretRect(for: textView, location: lineRange.location) {
+                return rect.minX
+            }
+            return 0
+        }
+
+        private func setGhostText(_ text: String, anchor: Int, textView: STTextView) {
+            ghostText = text
+            ghostAnchor = anchor
+            updateGhostView(textView: textView)
+        }
+
+        private func clearGhostText(textView: STTextView?) {
+            ghostText = ""
+            ghostAnchor = nil
+            if let textView {
+                updateGhostView(textView: textView)
+            } else {
+                ghostTextView?.ghostText = ""
+                ghostTextView?.setVisible(false)
+            }
+        }
+
+        private func resetCompletionState(textView: STTextView) {
+            cancelPendingCompletion()
+            cancelInFlightCompletion()
+            clearGhostText(textView: textView)
+        }
+
+        private func applyGhostText(textView: STTextView) {
+            guard !ghostText.isEmpty else { return }
+            let insertion = ghostText
+            clearGhostText(textView: textView)
+            isApplyingCompletion = true
+            textView.insertText(insertion, replacementRange: textView.selectedRange())
+            isApplyingCompletion = false
+        }
+
+        private func cancelPendingCompletion() {
+            completionWorkItem?.cancel()
+            completionWorkItem = nil
+        }
+
+        private func cancelInFlightCompletion() {
+            completionTask?.cancel()
+            completionTask = nil
+            parent.cancelCompletionRequest?()
+            completionRequestID += 1
+        }
+
+        private func scheduleCompletion(textView: STTextView) {
+            guard parent.completionProvider != nil else { return }
+            guard parent.fileURL != nil else { return }
+            guard textView.window?.firstResponder === textView else { return }
+            let selection = textView.selectedRange()
+            guard selection.length == 0 else { return }
+            completionWorkItem?.cancel()
+            completionRequestID += 1
+            let requestID = completionRequestID
+            let workItem = DispatchWorkItem { [weak self, weak textView] in
+                guard let self, let textView else { return }
+                self.requestCompletion(textView: textView, requestID: requestID)
+            }
+            completionWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + completionDebounceInterval, execute: workItem)
+        }
+
+        private func requestCompletion(textView: STTextView, requestID: Int) {
+            guard let provider = parent.completionProvider else { return }
+            let selection = textView.selectedRange()
+            guard selection.length == 0 else { return }
+            let text = textView.attributedString().string
+            let nsText = text as NSString
+            let cursor = min(max(0, selection.location), nsText.length)
+            let position = lineAndColumn(in: nsText, location: cursor)
+            let request = EditorCompletionRequest(
+                text: text,
+                cursorOffset: cursor,
+                line: position.line,
+                column: position.column,
+                fileURL: parent.fileURL,
+                languageName: parent.language?.name
+            )
+            cancelInFlightCompletion()
+            completionRequestID = requestID
+            let anchor = cursor
+            completionTask = Task { [weak self, weak textView] in
+                guard let self, let textView else { return }
+                let result = await provider(request, { partial in
+                    Task { @MainActor in
+                        guard self.completionRequestID == requestID else { return }
+                        guard !partial.isEmpty else { return }
+                        self.setGhostText(partial, anchor: anchor, textView: textView)
+                    }
+                })
+                guard !Task.isCancelled else { return }
+                guard self.completionRequestID == requestID else { return }
+                if let result, !result.isEmpty, !self.isSuggestionRedundant(result, textView: textView, anchor: anchor) {
+                    self.setGhostText(result, anchor: anchor, textView: textView)
+                } else {
+                    self.clearGhostText(textView: textView)
+                }
+            }
+        }
+
+        private func isSuggestionRedundant(_ suggestion: String, textView: STTextView, anchor: Int) -> Bool {
+            let nsText = textView.attributedString().string as NSString
+            let cursor = min(max(0, anchor), nsText.length)
+            let suffix = nsText.substring(from: cursor)
+            return suffix.hasPrefix(suggestion)
+        }
+
+        private func isNavigationCommand(_ selector: Selector) -> Bool {
+            let commands: [Selector] = [
+                #selector(NSResponder.moveLeft(_:)),
+                #selector(NSResponder.moveRight(_:)),
+                #selector(NSResponder.moveUp(_:)),
+                #selector(NSResponder.moveDown(_:)),
+                #selector(NSResponder.moveWordLeft(_:)),
+                #selector(NSResponder.moveWordRight(_:)),
+                #selector(NSResponder.moveToBeginningOfLine(_:)),
+                #selector(NSResponder.moveToEndOfLine(_:)),
+                #selector(NSResponder.moveToBeginningOfParagraph(_:)),
+                #selector(NSResponder.moveToEndOfParagraph(_:)),
+                #selector(NSResponder.moveToBeginningOfDocument(_:)),
+                #selector(NSResponder.moveToEndOfDocument(_:)),
+                #selector(NSResponder.pageUp(_:)),
+                #selector(NSResponder.pageDown(_:)),
+                #selector(NSResponder.scrollPageUp(_:)),
+                #selector(NSResponder.scrollPageDown(_:)),
+            ]
+            return commands.contains(selector)
         }
 
         private func updateBracketHighlights(textView: STTextView, selection: NSRange) {
@@ -1144,6 +1552,7 @@ struct ContentView: View {
                                                 scrollbarMode: workspace.scrollbarVisibilityMode,
                                                 scrollbarMetrics: nvimScrollbarMetrics,
                                                 theme: workspace.theme,
+                                                floatingWindowEffects: workspace.nvimFloatingWindowEffects,
                                                 onScrollToOffset: { offset in
                                                     let topLine = Int(offset.rounded()) + 1
                                                     workspace.scrollNvimToTopLine(topLine)
@@ -1294,6 +1703,9 @@ struct ContentView: View {
                     fileURL: workspace.selectedFileURL,
                     theme: workspace.theme,
                     font: workspace.editorFont,
+                    lineSpacing: workspace.editorLineSpacing,
+                    characterSpacing: workspace.editorCharacterSpacing,
+                    ligaturesEnabled: workspace.editorLigaturesEnabled,
                     scrollbarMode: workspace.scrollbarVisibilityMode,
                     showsLineNumbers: true,
                     highlightsCurrentLine: true,
@@ -1313,6 +1725,15 @@ struct ContentView: View {
                         workspace.cursorLine = line
                         workspace.cursorColumn = column
                         focusedPane = .editor
+                    },
+                    onTextEdit: { line, column in
+                        workspace.recordEditorEdit(line: line, column: column)
+                    },
+                    completionProvider: { request, onPartial in
+                        await workspace.requestEditorCompletion(request, onPartial: onPartial)
+                    },
+                    cancelCompletionRequest: {
+                        workspace.cancelEditorCompletion()
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
