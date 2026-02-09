@@ -514,7 +514,7 @@ struct ChatView: View {
                     workspace.sendChatMessage()
                 }
                 .onPasteCommand(of: [UTType.image]) { _ in
-                    workspace.handleChatImagePaste()
+                    _ = workspace.handleChatImagePaste()
                 }
 
             if !workspace.chatDraftImages.isEmpty {
@@ -886,7 +886,8 @@ struct MessageActionBar: View {
         let canRetry = workspace.canRetryMessage(message)
         let canEdit = workspace.canEditMessage(message)
         let canRollback = workspace.canRollbackToMessage(message)
-        let hasAny = canFork || canCopy || canRetry || canEdit || canRollback
+        let canRevertJJ = workspace.canRevertJJMessage(message)
+        let hasAny = canFork || canCopy || canRetry || canEdit || canRollback || canRevertJJ
 
         return Group {
             if hasAny {
@@ -895,7 +896,8 @@ struct MessageActionBar: View {
                     canCopy: canCopy,
                     canRetry: canRetry,
                     canEdit: canEdit,
-                    canRollback: canRollback
+                    canRollback: canRollback,
+                    canRevertJJ: canRevertJJ
                 )
             }
         }
@@ -907,9 +909,21 @@ struct MessageActionBar: View {
         canCopy: Bool,
         canRetry: Bool,
         canEdit: Bool,
-        canRollback: Bool
+        canRollback: Bool,
+        canRevertJJ: Bool = false
     ) -> some View {
         HStack(spacing: 6) {
+            if canRevertJJ {
+                Button {
+                    Task { await workspace.revertJJMessage(message) }
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: Typography.xs, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .help("Revert file changes (jj)")
+            }
+
             if canFork {
                 Button {
                     workspace.forkChat(from: message)

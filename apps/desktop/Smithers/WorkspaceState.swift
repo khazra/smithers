@@ -292,6 +292,22 @@ class WorkspaceState: ObservableObject {
         }
     }
     @Published var sidebarVisibility: NavigationSplitViewVisibility = .doubleColumn
+
+    // MARK: - JJ Version Control
+    @Published var jjService: JJService?
+    @Published var jjSnapshotStore: JJSnapshotStore?
+    @Published var agentOrchestrator: AgentOrchestrator?
+    @Published var vcsPreferences: VCSPreferences = VCSPreferences()
+    @Published var isJJPanelVisible: Bool = false
+    @Published var isAgentDashboardVisible: Bool = false
+    @Published var jjModifiedFiles: [JJFileDiff] = []
+    @Published var jjChangeLog: [JJChange] = []
+    @Published var jjBookmarks: [JJBookmark] = []
+    @Published var jjOperations: [JJOperation] = []
+    @Published var jjConflicts: [String] = []
+    @Published var jjSnapshots: [Snapshot] = []
+    @Published var detectedCommitStyle: CommitStyle = .freeform
+    private var saveSnapshotDebounceTask: Task<Void, Never>?
     @Published var isNvimModeEnabled: Bool = false {
         didSet {
             inputMethodSwitcher.setActive(isNvimModeEnabled)
@@ -723,6 +739,13 @@ class WorkspaceState: ObservableObject {
     private static let webviewScheme = "smithers-webview"
     private static let lastWorkspaceKey = "smithers.lastWorkspacePath"
     private static let sessionStateKey = "smithers.sessionStateByRoot"
+    private static var isRunningTests: Bool {
+        let env = ProcessInfo.processInfo.environment
+        if env["XCTestConfigurationFilePath"] != nil { return true }
+        if env["XCTestSessionIdentifier"] != nil { return true }
+        if env["XCTestBundlePath"] != nil { return true }
+        return NSClassFromString("XCTestCase") != nil
+    }
     private static let recentFilesKey = "smithers.recentFiles"
     private static let recentFoldersKey = "smithers.recentFolders"
     private static let maxRecentItems = 10
@@ -1279,6 +1302,7 @@ class WorkspaceState: ObservableObject {
         startCodexService(cwd: url.path, resumeThreadId: storedThreadId)
         startCompletionService(cwd: url.path)
         refreshSkills(force: true)
+        setupJJService(for: url)
         suppressSessionPersistence = false
         persistSessionStateIfNeeded()
         applyWindowFrameForCurrentWorkspace()
@@ -2833,6 +2857,7 @@ class WorkspaceState: ObservableObject {
             if notify {
                 showToast("Saved")
             }
+            snapshotOnSaveIfEnabled(url: normalized)
         } catch {
             appendErrorMessage("Failed to save \(displayPath(for: normalized)): \(error.localizedDescription)")
             if notify {
@@ -3792,7 +3817,8 @@ class WorkspaceState: ObservableObject {
     }
 
     private func activeWindow() -> NSWindow? {
-        NSApp.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) ?? NSApp.windows.first
+        guard let app = NSApp else { return nil }
+        return app.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) ?? app.windows.first
     }
 
     private func updateWindowVisibility() {
@@ -4591,6 +4617,105 @@ class WorkspaceState: ObservableObject {
                     self?.showSkillUse()
                 }
             ),
+            // MARK: - JJ Version Control Commands
+            PaletteCommand(
+                id: "jj-toggle-panel",
+                title: "Source Control: Toggle Panel",
+                icon: "arrow.triangle.branch",
+                shortcut: "⌃⇧G",
+                action: { [weak self] in
+                    self?.isJJPanelVisible.toggle()
+                }
+            ),
+            PaletteCommand(
+                id: "jj-commit",
+                title: "Source Control: Commit",
+                icon: "checkmark.circle",
+                shortcut: nil,
+                action: { [weak self] in
+                    Task { await self?.jjCommit() }
+                }
+            ),
+            PaletteCommand(
+                id: "jj-new",
+                title: "Source Control: New Change",
+                icon: "plus.circle",
+                shortcut: nil,
+                action: { [weak self] in
+                    Task { await self?.jjNewChange() }
+                }
+            ),
+            PaletteCommand(
+                id: "jj-undo",
+                title: "Source Control: Undo",
+                icon: "arrow.uturn.backward",
+                shortcut: nil,
+                action: { [weak self] in
+                    Task { await self?.jjUndo() }
+                }
+            ),
+            PaletteCommand(
+                id: "jj-push",
+                title: "Source Control: Push",
+                icon: "arrow.up",
+                shortcut: nil,
+                action: { [weak self] in
+                    Task {
+                        try? await self?.jjService?.gitPush(allTracked: true)
+                        await self?.refreshJJStatus()
+                        self?.showToast("Pushed")
+                    }
+                }
+            ),
+            PaletteCommand(
+                id: "jj-fetch",
+                title: "Source Control: Fetch",
+                icon: "arrow.down",
+                shortcut: nil,
+                action: { [weak self] in
+                    Task {
+                        try? await self?.jjService?.gitFetch()
+                        await self?.refreshJJStatus()
+                        self?.showToast("Fetched")
+                    }
+                }
+            ),
+            PaletteCommand(
+                id: "jj-toggle-blame",
+                title: "Source Control: Toggle Inline Blame",
+                icon: "text.alignleft",
+                shortcut: nil,
+                action: { [weak self] in
+                    self?.vcsPreferences.showInlineBlame.toggle()
+                }
+            ),
+            PaletteCommand(
+                id: "jj-snapshot-browser",
+                title: "Source Control: Snapshot Browser",
+                icon: "clock.arrow.circlepath",
+                shortcut: nil,
+                action: { [weak self] in
+                    self?.showSnapshotBrowser()
+                }
+            ),
+            PaletteCommand(
+                id: "jj-agent-dashboard",
+                title: "Agents: Dashboard",
+                icon: "person.3",
+                shortcut: nil,
+                action: { [weak self] in
+                    self?.isAgentDashboardVisible.toggle()
+                }
+            ),
+            PaletteCommand(
+                id: "jj-spawn-agent",
+                title: "Agents: Spawn New Agent",
+                icon: "person.badge.plus",
+                shortcut: nil,
+                action: { [weak self] in
+                    self?.showNewAgentPrompt()
+                }
+            ),
         ]
     }
 
@@ -4763,25 +4888,71 @@ class WorkspaceState: ObservableObject {
         searchInFilesToken += 1
         let token = searchInFilesToken
         let rootPath = rootDirectory.path
-        searchInFilesTask = Task.detached { [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard let self, !Task.isCancelled else { return }
-            let result = await Self.runRipgrep(query: trimmedQuery, rootPath: rootPath)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
+        searchInFilesTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 250_000_000)
+            } catch {
+                guard let self else { return }
                 guard token == self.searchInFilesToken else { return }
-                switch result {
-                case .success(let results):
-                    self.searchResults = results
-                    self.searchErrorMessage = nil
-                case .failure(let message):
-                    self.searchResults = []
-                    self.searchErrorMessage = message
-                }
                 self.isSearchInProgress = false
+                return
             }
+            guard let self, !Task.isCancelled else { return }
+            let result = await Task.detached(priority: .utility) {
+                await Self.runRipgrep(query: trimmedQuery, rootPath: rootPath)
+            }.value
+            guard token == self.searchInFilesToken else { return }
+            switch result {
+            case .success(let results):
+                self.searchResults = results
+                self.searchErrorMessage = nil
+            case .failure(let message):
+                self.searchResults = []
+                self.searchErrorMessage = message
+            }
+            self.isSearchInProgress = false
         }
     }
+
+#if DEBUG
+    @MainActor
+    func runSearchInFilesForTesting(query: String) async {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let rootDirectory else {
+            searchResults = []
+            clearSearchPreview()
+            isSearchInProgress = false
+            return
+        }
+        guard !trimmedQuery.isEmpty else {
+            searchResults = []
+            searchErrorMessage = nil
+            clearSearchPreview()
+            isSearchInProgress = false
+            return
+        }
+        searchInFilesTask?.cancel()
+        isSearchInProgress = true
+        searchErrorMessage = nil
+        clearSearchPreview()
+        searchInFilesToken += 1
+        let token = searchInFilesToken
+        let rootPath = rootDirectory.path
+        let result = await Task.detached(priority: .utility) {
+            await Self.runRipgrep(query: trimmedQuery, rootPath: rootPath)
+        }.value
+        guard token == searchInFilesToken else { return }
+        switch result {
+        case .success(let results):
+            searchResults = results
+            searchErrorMessage = nil
+        case .failure(let message):
+            searchResults = []
+            searchErrorMessage = message
+        }
+        isSearchInProgress = false
+    }
+#endif
 
     nonisolated private static func scoreCommandMatch(query: String, in text: String) -> Int? {
         fuzzyScore(query: query, in: text, fileNameStartIndex: 0)
@@ -5221,6 +5392,7 @@ class WorkspaceState: ObservableObject {
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = outputPipe
         process.standardError = errorPipe
 
@@ -5249,7 +5421,7 @@ class WorkspaceState: ObservableObject {
     ) async -> SearchOutcome {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["rg", "--json", "--smart-case", "--", query]
+        process.arguments = ["rg", "--json", "--smart-case", "--", query, "."]
         process.currentDirectoryURL = URL(fileURLWithPath: rootPath)
 
         let outputPipe = Pipe()
@@ -5420,6 +5592,7 @@ class WorkspaceState: ObservableObject {
 
     private func startCodexService(cwd: String, resumeThreadId: String?) {
         stopCodexService()
+        guard !Self.isRunningTests else { return }
         let service = CodexService()
         service.attachWorkspace(self)
         codexService = service
@@ -5448,6 +5621,7 @@ class WorkspaceState: ObservableObject {
 
     private func startCompletionService(cwd: String) {
         stopCompletionService()
+        guard !Self.isRunningTests else { return }
         let service = CodexCompletionService()
         completionService = service
 
@@ -5512,7 +5686,7 @@ class WorkspaceState: ObservableObject {
             appendStreamingDiff(turnId: turnId, delta: delta)
         case .turnDiffUpdated(let turnId, let diff):
             updateTurnDiffPreview(turnId: turnId, diff: diff)
-        case .turnCompleted(_, let status):
+        case .turnCompleted(let turnId, let status):
             isTurnInProgress = false
             finalizeAgentMessage(turnId: nil, text: nil)
             if status == "failed" {
@@ -5521,6 +5695,9 @@ class WorkspaceState: ObservableObject {
                 appendErrorMessage("Turn interrupted.")
             } else if status != "completed" {
                 appendErrorMessage("Turn finished with status: \(status)")
+            }
+            if status == "completed" {
+                autoSnapshotAfterTurn(turnId: turnId)
             }
         case .error(let message):
             isTurnInProgress = false
@@ -5769,13 +5946,16 @@ class WorkspaceState: ObservableObject {
         }
         let view = WKWebView()
         view.load(URLRequest(url: tab.url))
+        let tabId = tab.id
         let observation = view.observe(\.title, options: [.new]) { [weak self] webView, change in
-            guard let self else { return }
             let nextTitle = change.newValue ?? webView.title
             guard let title = nextTitle, !title.isEmpty else { return }
-            if var existingTab = self.webviewTabs[tab.id] {
-                existingTab.title = title
-                self.webviewTabs[tab.id] = existingTab
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if var existingTab = self.webviewTabs[tabId] {
+                    existingTab.title = title
+                    self.webviewTabs[tabId] = existingTab
+                }
             }
         }
         webviewViews[tab.id] = view
@@ -6044,220 +6224,6 @@ Recent edits:
         return text
     }
 
-    // MARK: - Skills
-
-    func refreshSkills(force: Bool = false) {
-        skillRefreshTask?.cancel()
-        let root = rootDirectory
-        let scanner = skillScanner
-        skillRefreshTask = Task.detached { [weak self] in
-            guard let self else { return }
-            let output = await scanner.scan(rootDirectory: root)
-            await MainActor.run {
-                self.skillItems = output.skills
-                self.skillErrors = output.errors
-                if force {
-                    self.updateSkillWatchers(rootDirectory: root)
-                }
-            }
-        }
-    }
-
-    func searchRegistry(query: String) async throws -> [SkillRegistryEntry] {
-        try await skillRegistryClient.search(query: query)
-    }
-
-    func fetchRegistryMarkdown(_ entry: SkillRegistryEntry) async -> String? {
-        await skillRegistryClient.fetchSkillMarkdown(source: entry.source, skillId: entry.skillId)
-    }
-
-    func installRegistrySkill(_ entry: SkillRegistryEntry, scope: SkillScope) {
-        installSkill(
-            source: .registry(entry: entry),
-            scope: scope,
-            title: "Install \(entry.skillId)"
-        )
-    }
-
-    func installSkill(from input: String, scope: SkillScope) {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let (source, skillName) = parseSkillSpecifier(trimmed)
-        let sourceType = resolveSkillInstallSource(source: source, skillName: skillName)
-        installSkill(source: sourceType, scope: scope, title: "Install Skill")
-    }
-
-    func openSkillDetail(_ skill: SkillItem) {
-        let skillFile = skill.path.appendingPathComponent("SKILL.md")
-        selectFile(skillFile)
-    }
-
-    func updateSkill(_ skill: SkillItem) {
-        guard let source = skill.source, !source.isEmpty else {
-            showToast("No update source")
-            return
-        }
-        let suffix = source.contains("@") ? "" : "@\(skill.path.lastPathComponent)"
-        installSkill(from: source + suffix, scope: skill.scope)
-    }
-
-    func removeSkill(_ skill: SkillItem) {
-        do {
-            try FileManager.default.removeItem(at: skill.path)
-            SkillInstallStore.shared.remove(path: skill.path)
-            showToast("Removed \(skill.name)")
-            refreshSkills(force: true)
-        } catch {
-            appendErrorMessage("Failed to remove skill: \(error.localizedDescription)")
-            showToast("Remove failed")
-        }
-    }
-
-    func moveSkill(_ skill: SkillItem, to scope: SkillScope) {
-        guard let destinationBase = skillScopeDirectory(scope: scope) else {
-            showToast("No project workspace")
-            return
-        }
-        let destination = destinationBase.appendingPathComponent(skill.path.lastPathComponent, isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: destinationBase, withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: destination.path) {
-                appendErrorMessage("Destination already exists: \(destination.path)")
-                showToast("Move failed")
-                return
-            }
-            try FileManager.default.moveItem(at: skill.path, to: destination)
-            if let record = SkillInstallStore.shared.record(for: skill.path) {
-                SkillInstallStore.shared.remove(path: skill.path)
-                let updated = SkillInstallRecord(
-                    path: destination.standardizedFileURL.path,
-                    source: record.source,
-                    installedAt: record.installedAt,
-                    lastUpdatedAt: record.lastUpdatedAt
-                )
-                SkillInstallStore.shared.upsert(record: updated)
-            }
-            showToast("Moved \(skill.name)")
-            refreshSkills(force: true)
-        } catch {
-            appendErrorMessage("Failed to move skill: \(error.localizedDescription)")
-            showToast("Move failed")
-        }
-    }
-
-    func isSkillActive(_ skill: SkillItem) -> Bool {
-        activeSkills.contains { $0.skill.id == skill.id }
-    }
-
-    func activateSkillInline(_ skill: SkillItem) {
-        activateSkill(skill, mode: .inline)
-    }
-
-    func activateSkillInNewTab(_ skill: SkillItem) {
-        let threadId = activeThreadId ?? UUID().uuidString
-        activateSkill(skill, mode: .tab(threadId: threadId))
-    }
-
-    private func activateSkill(_ skill: SkillItem, mode: SkillActivationMode) {
-        if activeSkills.contains(where: { $0.skill.id == skill.id && $0.mode == mode }) {
-            showToast("\(skill.name) already active")
-            return
-        }
-        let entry = ActiveSkill(
-            id: UUID().uuidString,
-            skill: skill,
-            activatedAt: Date(),
-            mode: mode,
-            arguments: nil
-        )
-        activeSkills.append(entry)
-        showToast("Activated \(skill.name)")
-    }
-
-    private func installSkill(
-        source: SkillInstallSource,
-        scope: SkillScope,
-        title: String
-    ) {
-        let root = rootDirectory
-        showToast(title)
-        Task.detached { [root, source, scope] in
-            let installer = SkillInstaller()
-            do {
-                _ = try installer.install(
-                    source: source,
-                    scope: scope,
-                    rootDirectory: root,
-                    confirmScripts: nil
-                )
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.showToast("Skill installed")
-                    self.refreshSkills(force: true)
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.appendErrorMessage("Skill install failed: \(error.localizedDescription)")
-                    self.showToast("Install failed")
-                }
-            }
-        }
-    }
-
-    private func parseSkillSpecifier(_ input: String) -> (String, String?) {
-        let parts = input.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
-        if parts.count == 2 {
-            let source = String(parts[0])
-            let name = parts[1].isEmpty ? nil : String(parts[1])
-            return (source, name)
-        }
-        return (input, nil)
-    }
-
-    private func resolveSkillInstallSource(source: String, skillName: String?) -> SkillInstallSource {
-        let expanded = (source as NSString).expandingTildeInPath
-        let fm = FileManager.default
-        if fm.fileExists(atPath: expanded) {
-            return .local(path: expanded, skillName: skillName)
-        }
-        if source.hasPrefix("http") || source.hasPrefix("git@") {
-            return .git(url: source, skillName: skillName)
-        }
-        if source.contains("/") {
-            return .git(url: source, skillName: skillName)
-        }
-        return .local(path: expanded, skillName: skillName)
-    }
-
-    private func skillScopeDirectory(scope: SkillScope) -> URL? {
-        let fm = FileManager.default
-        switch scope {
-        case .project:
-            guard let rootDirectory else { return nil }
-            return rootDirectory.appendingPathComponent(".agents/skills", isDirectory: true)
-        case .user:
-            return fm.homeDirectoryForCurrentUser.appendingPathComponent(".agents/skills", isDirectory: true)
-        case .admin:
-            return URL(fileURLWithPath: "/etc/codex/skills", isDirectory: true)
-        case .system:
-            return nil
-        }
-    }
-
-    private func updateSkillWatchers(rootDirectory: URL?) {
-        skillWatchers.forEach { $0.stop() }
-        skillWatchers = []
-        let directories = skillScanner.skillDirectories(rootDirectory: rootDirectory)
-        for entry in directories {
-            if let watcher = DirectoryWatcher(url: entry.url, onChange: { [weak self] in
-                self?.refreshSkills()
-            }) {
-                skillWatchers.append(watcher)
-            }
-        }
-    }
-
     private func resolveFileURL(path: String) -> URL? {
         resolvePathURL(path: path, allowDirectory: false)
     }
@@ -6281,4 +6247,849 @@ Recent edits:
     }
 
 
+}
+
+extension WorkspaceState {
+    func refreshSkills(force: Bool = false) {
+        guard !Self.isRunningTests else { return }
+        skillRefreshTask?.cancel()
+        let root = rootDirectory
+        skillRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            let output = await skillScanner.scan(rootDirectory: root)
+            await MainActor.run {
+                self.skillItems = output.skills
+                self.skillErrors = output.errors
+                let directories = self.skillScanner.skillDirectories(rootDirectory: root).map(\.url)
+                self.setupSkillWatchers(for: directories)
+            }
+        }
+    }
+
+    private func setupSkillWatchers(for directories: [URL]) {
+        skillWatchers.forEach { $0.invalidate() }
+        skillWatchers = directories.compactMap { url in
+            DirectoryWatcher(url: url) { [weak self] in
+                self?.refreshSkills(force: true)
+            }
+        }
+    }
+
+    func showSkillBrowser() {
+        activeSkillModal = .browse
+    }
+
+    func showSkillManager() {
+        activeSkillModal = .manage
+    }
+
+    func showSkillUse() {
+        activeSkillModal = .use
+    }
+
+    func showSkillCreator() {
+        activeSkillModal = .create
+    }
+
+    func openSkillDetail(_ skill: SkillItem) {
+        activeSkillModal = .detail(skill)
+    }
+
+    func searchRegistry(query: String) async throws -> [SkillRegistryEntry] {
+        try await skillRegistryClient.search(query: query)
+    }
+
+    func fetchRegistryMarkdown(_ entry: SkillRegistryEntry) async -> String? {
+        await skillRegistryClient.fetchSkillMarkdown(source: entry.source, skillId: entry.skillId)
+    }
+
+    func installRegistrySkill(_ entry: SkillRegistryEntry, scope: SkillScope) {
+        installSkill(source: .registry(entry: entry), scope: scope)
+    }
+
+    func installSkill(from input: String, scope: SkillScope) {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let (sourceText, skillName) = parseSkillInstallInput(trimmed)
+        if let localURL = resolvePathURL(path: sourceText, allowDirectory: true) {
+            installSkill(source: .local(path: localURL.path, skillName: skillName), scope: scope)
+            return
+        }
+        installSkill(source: .git(url: sourceText, skillName: skillName), scope: scope)
+    }
+
+    private func parseSkillInstallInput(_ text: String) -> (String, String?) {
+        guard let atIndex = text.lastIndex(of: "@") else {
+            return (text, nil)
+        }
+        let after = text[text.index(after: atIndex)...]
+        let before = text[..<atIndex]
+        if after.contains("/") || after.isEmpty {
+            return (text, nil)
+        }
+        if before.contains("git@") || before.contains("://") {
+            return (text, nil)
+        }
+        return (String(before), String(after))
+    }
+
+    private func installSkill(source: SkillInstallSource, scope: SkillScope) {
+        guard scope != .system else {
+            showToast("System skills are read-only.")
+            return
+        }
+        let root = rootDirectory
+        let installer = skillInstaller
+        let confirmScripts: ([URL]) -> Bool = { [weak self] scripts in
+            guard let self else { return false }
+            if Thread.isMainThread {
+                return self.confirmSkillScripts(scripts)
+            }
+            return DispatchQueue.main.sync {
+                self.confirmSkillScripts(scripts)
+            }
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await Task.detached(priority: .utility) {
+                    try installer.install(
+                        source: source,
+                        scope: scope,
+                        rootDirectory: root,
+                        confirmScripts: confirmScripts
+                    )
+                }.value
+                await MainActor.run {
+                    self.showToast("Installed \(result.skill.name) to \(scope.rawValue)")
+                    self.refreshSkills(force: true)
+                }
+            } catch {
+                await MainActor.run {
+                    self.appendErrorMessage("Skill install failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    func updateSkill(_ skill: SkillItem) {
+        guard let source = skill.source, !source.isEmpty else {
+            showToast("No update source available.")
+            return
+        }
+        installSkill(source: .git(url: source, skillName: skill.name), scope: skill.scope)
+    }
+
+    func removeSkill(_ skill: SkillItem) {
+        guard skill.scope == .project || skill.scope == .user else {
+            showToast("This skill cannot be removed.")
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Remove \"\(skill.name)\"?"
+        alert.informativeText = "This deletes the skill from \(skill.scope.rawValue) scope."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try FileManager.default.removeItem(at: skill.path)
+            SkillInstallStore.shared.remove(path: skill.path)
+            showToast("Removed \(skill.name)")
+            refreshSkills(force: true)
+        } catch {
+            appendErrorMessage("Failed to remove skill: \(error.localizedDescription)")
+        }
+    }
+
+    func moveSkill(_ skill: SkillItem, to scope: SkillScope) {
+        guard skill.scope != scope else { return }
+        guard let destinationRoot = skillScopeDirectory(for: scope) else {
+            showToast("Open a folder to move project skills.")
+            return
+        }
+        let destination = destinationRoot.appendingPathComponent(skill.name, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: destinationRoot, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: skill.path, to: destination)
+            if let record = SkillInstallStore.shared.record(for: skill.path) {
+                let updated = SkillInstallRecord(
+                    path: destination.standardizedFileURL.path,
+                    source: record.source,
+                    installedAt: record.installedAt,
+                    lastUpdatedAt: record.lastUpdatedAt
+                )
+                SkillInstallStore.shared.upsert(record: updated)
+                SkillInstallStore.shared.remove(path: skill.path)
+            }
+            try FileManager.default.removeItem(at: skill.path)
+            showToast("Moved \(skill.name) to \(scope.rawValue)")
+            refreshSkills(force: true)
+        } catch {
+            appendErrorMessage("Failed to move skill: \(error.localizedDescription)")
+        }
+    }
+
+    func isSkillActive(_ skill: SkillItem) -> Bool {
+        activeSkills.contains { $0.skill.id == skill.id }
+    }
+
+    func activateSkillInline(_ skill: SkillItem) {
+        guard !isTurnInProgress else {
+            showToast("Wait for the current turn to finish.")
+            return
+        }
+        guard !isSkillActive(skill) else {
+            showToast("Skill \"\(skill.name)\" is already active.")
+            return
+        }
+        let arguments = promptForSkillArguments(skill)
+        guard arguments != nil || skill.argumentHint == nil else { return }
+        let active = ActiveSkill(
+            id: "\(skill.id)::inline",
+            skill: skill,
+            activatedAt: Date(),
+            mode: .inline,
+            arguments: arguments
+        )
+        activeSkills.append(active)
+        storeActiveChatSessionState()
+        showToast("Skill \"\(skill.name)\" activated")
+    }
+
+    func activateSkillInNewTab(_ skill: SkillItem) {
+        guard !isTurnInProgress else {
+            showToast("Wait for the current turn to finish.")
+            return
+        }
+        guard let rootDirectory else {
+            appendErrorMessage("Open a folder to start a skill tab.")
+            return
+        }
+        guard let codexService else {
+            appendErrorMessage("Codex service is not running.")
+            return
+        }
+        let arguments = promptForSkillArguments(skill)
+        guard arguments != nil || skill.argumentHint == nil else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let threadId = try await codexService.startNewThread(cwd: rootDirectory.path)
+                storeActiveChatSessionState()
+                let chatId = UUID().uuidString
+                let session = ChatSessionState(
+                    id: chatId,
+                    title: skill.name,
+                    threadId: threadId,
+                    messages: Self.initialChatMessages(),
+                    activeSkills: [
+                        ActiveSkill(
+                            id: "\(skill.id)::tab::\(threadId)",
+                            skill: skill,
+                            activatedAt: Date(),
+                            mode: .tab(threadId: threadId),
+                            arguments: arguments
+                        )
+                    ]
+                )
+                chatSessions[chatId] = session
+                activeChatId = chatId
+                loadChatSessionState(session)
+                updateActiveThreadId(threadId)
+                let url = Self.chatURL(for: chatId)
+                if !openFiles.contains(url) {
+                    openFiles.append(url)
+                }
+                selectedFileURL = url
+                currentLanguage = nil
+                setEditorText("")
+                showToast("Skill \"\(skill.name)\" opened in new tab")
+                if let args = arguments, !args.isEmpty {
+                    sendChatMessage(text: args)
+                }
+            } catch {
+                appendErrorMessage("Failed to start skill tab: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func deactivateSkill(_ skill: SkillItem) {
+        activeSkills.removeAll { $0.skill.id == skill.id }
+        storeActiveChatSessionState()
+    }
+
+    func deactivateAllSkills() {
+        activeSkills.removeAll()
+        storeActiveChatSessionState()
+    }
+
+    func createSkill(
+        name: String,
+        scope: SkillScope,
+        contents: String,
+        scripts: [SkillScriptTemplate]
+    ) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            showToast("Skill name is required.")
+            return false
+        }
+        guard let destinationRoot = skillScopeDirectory(for: scope) else {
+            showToast("Open a folder to create project skills.")
+            return false
+        }
+        let document = SkillFrontmatterParser.parseDocument(from: contents)
+        guard let fmName = document.frontmatter.name,
+              let _ = document.frontmatter.description,
+              fmName == trimmedName
+        else {
+            showToast("SKILL.md frontmatter must include matching name and description.")
+            return false
+        }
+        let destination = destinationRoot.appendingPathComponent(trimmedName, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: destinationRoot, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                let alert = NSAlert()
+                alert.messageText = "Overwrite skill \"\(trimmedName)\"?"
+                alert.informativeText = "This replaces the existing skill contents."
+                alert.addButton(withTitle: "Overwrite")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return false }
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            let skillFile = destination.appendingPathComponent("SKILL.md")
+            try contents.trimmingCharacters(in: .newlines).appending("\n").write(to: skillFile, atomically: true, encoding: .utf8)
+            if !scripts.isEmpty {
+                let scriptsDir = destination.appendingPathComponent("scripts", isDirectory: true)
+                try FileManager.default.createDirectory(at: scriptsDir, withIntermediateDirectories: true)
+                for script in scripts {
+                    let scriptURL = scriptsDir.appendingPathComponent(script.name)
+                    try script.contents.trimmingCharacters(in: .newlines).appending("\n").write(to: scriptURL, atomically: true, encoding: .utf8)
+                    if script.isExecutable {
+                        makeFileExecutable(at: scriptURL)
+                    }
+                }
+            }
+            let record = SkillInstallRecord(
+                path: destination.standardizedFileURL.path,
+                source: nil,
+                installedAt: Date(),
+                lastUpdatedAt: nil
+            )
+            SkillInstallStore.shared.upsert(record: record)
+            showToast("Created skill \"\(trimmedName)\"")
+            refreshSkills(force: true)
+            return true
+        } catch {
+            appendErrorMessage("Failed to create skill: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func confirmSkillScripts(_ scripts: [URL]) -> Bool {
+        let list = scripts.map { $0.lastPathComponent }.sorted().joined(separator: "\n• ")
+        let alert = NSAlert()
+        alert.messageText = "Skill includes scripts"
+        alert.informativeText = "These scripts will be installed and marked executable:\n• \(list)"
+        alert.addButton(withTitle: "Install")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func promptForSkillArguments(_ skill: SkillItem) -> String? {
+        guard let hint = skill.argumentHint, !hint.isEmpty else { return "" }
+        let alert = NSAlert()
+        alert.messageText = "Arguments for \"\(skill.name)\""
+        alert.informativeText = hint
+        let input = NSTextField(string: "")
+        input.placeholderString = hint
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            return input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private func skillScopeDirectory(for scope: SkillScope) -> URL? {
+        let fm = FileManager.default
+        switch scope {
+        case .project:
+            guard let rootDirectory else { return nil }
+            return rootDirectory.appendingPathComponent(".agents/skills", isDirectory: true)
+        case .user:
+            return fm.homeDirectoryForCurrentUser.appendingPathComponent(".agents/skills", isDirectory: true)
+        case .admin:
+            return URL(fileURLWithPath: "/etc/codex/skills", isDirectory: true)
+        case .system:
+            return nil
+        }
+    }
+
+    private func makeFileExecutable(at url: URL) {
+        let fm = FileManager.default
+        guard let attributes = try? fm.attributesOfItem(atPath: url.path),
+              var permissions = attributes[.posixPermissions] as? NSNumber else { return }
+        let current = permissions.intValue
+        let updated = current | 0o111
+        permissions = NSNumber(value: updated)
+        try? fm.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
+    }
+
+    private func buildSkillInstructionInputs() -> [UserInput] {
+        guard !activeSkills.isEmpty else { return [] }
+        return activeSkills.compactMap { active in
+            guard let block = renderSkillInstructionBlock(active) else { return nil }
+            return UserInput.text(block)
+        }
+    }
+
+    private func renderSkillInstructionBlock(_ active: ActiveSkill) -> String? {
+        let skillFile = active.skill.path.appendingPathComponent("SKILL.md")
+        guard let contents = try? String(contentsOf: skillFile, encoding: .utf8) else { return nil }
+        let expanded = expandSkillArguments(contents, arguments: active.arguments)
+        let path = skillFile.standardizedFileURL.path
+        return "<skill>\n<name>\(active.skill.name)</name>\n<path>\(path)</path>\n\(expanded)\n</skill>"
+    }
+
+    private func expandSkillArguments(_ text: String, arguments: String?) -> String {
+        guard let arguments, !arguments.isEmpty else { return text }
+        var output = text.replacingOccurrences(of: "$ARGUMENTS", with: arguments)
+        let parts = arguments.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        for index in 1...9 {
+            let token = "$\(index)"
+            let replacement = index <= parts.count ? parts[index - 1] : ""
+            output = output.replacingOccurrences(of: token, with: replacement)
+        }
+        return output
+    }
+
+    // MARK: - JJ Version Control Integration
+
+    func setupJJService(for url: URL) {
+        let service = JJService(workingDirectory: url)
+        let vcsType = service.detectVCS()
+        jjService = service
+
+        if vcsType == .jjColocated || vcsType == .jjNative {
+            let store = JJSnapshotStore(workspacePath: url.path)
+            do {
+                try store.setup()
+                jjSnapshotStore = store
+            } catch {
+                // SQLite setup failed — non-fatal
+            }
+
+            // Set up agent orchestrator
+            agentOrchestrator = AgentOrchestrator(
+                mainWorkspace: url,
+                jjService: service,
+                snapshotStore: store,
+                preferences: vcsPreferences
+            )
+
+            // Initial refresh
+            Task {
+                await refreshJJStatus()
+                detectedCommitStyle = await CommitStyleDetector.detectFromRepo(jjService: service)
+            }
+        }
+    }
+
+    func refreshJJStatus() async {
+        guard let jjService, jjService.isAvailable else { return }
+        do {
+            let status = try await jjService.status()
+            jjModifiedFiles = status.modifiedFiles
+            jjConflicts = status.conflicts
+
+            let changes = try await jjService.log(limit: 50)
+            jjChangeLog = changes
+
+            let bookmarks = try await jjService.bookmarkList()
+            jjBookmarks = bookmarks
+
+            let ops = try await jjService.opLog(limit: 20)
+            jjOperations = ops
+
+            if let store = jjSnapshotStore {
+                jjSnapshots = (try? store.snapshotsForWorkspace()) ?? []
+            }
+        } catch {
+            // Silently fail on refresh
+        }
+
+        rebuildPaletteCommands()
+    }
+
+    func initJJRepo() async {
+        guard let jjService else { return }
+        do {
+            try await jjService.initJJColocated()
+            if let rootDirectory {
+                let store = JJSnapshotStore(workspacePath: rootDirectory.path)
+                try store.setup()
+                jjSnapshotStore = store
+                agentOrchestrator = AgentOrchestrator(
+                    mainWorkspace: rootDirectory,
+                    jjService: jjService,
+                    snapshotStore: store,
+                    preferences: vcsPreferences
+                )
+            }
+            await refreshJJStatus()
+            showToast("jj initialized (colocated with git)")
+        } catch {
+            appendErrorMessage("Failed to initialize jj: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Auto-Snapshot
+
+    private func autoSnapshotAfterTurn(turnId: String) {
+        guard let jjService, jjService.isAvailable, vcsPreferences.snapshotOnAIChange else { return }
+        Task {
+            do {
+                let summary = lastAssistantMessageSummary()
+                try await jjService.describe(message: "ai: \(summary)")
+                let newChange = try await jjService.newChange()
+
+                // Record in SQLite
+                let chatSession = activeChatId
+                let messageIndex = chatMessages.count - 1
+                try? jjSnapshotStore?.recordSnapshot(
+                    changeId: newChange.changeId,
+                    commitId: newChange.commitId,
+                    description: "ai: \(summary)",
+                    snapshotType: .aiChange,
+                    chatSessionId: chatSession,
+                    chatMessageIndex: messageIndex
+                )
+
+                // Write git note if enabled
+                if vcsPreferences.gitNotesOnCommit, jjService.detectedVCSType == .jjColocated {
+                    let commitId = try await jjService.commitIdForChange(newChange.changeId)
+                    let note = SmithersNotePayload(
+                        sessionId: chatSession,
+                        prompts: [],
+                        model: nil,
+                        filesChanged: jjModifiedFiles.map(\.path),
+                        snapshotIds: [newChange.changeId]
+                    )
+                    if let noteJSON = try? JSONEncoder().encode(note),
+                       let noteStr = String(data: noteJSON, encoding: .utf8) {
+                        try? await jjService.addGitNote(commitId: commitId, note: noteStr)
+                    }
+                }
+
+                await refreshJJStatus()
+            } catch {
+                // Non-fatal
+            }
+        }
+    }
+
+    private func snapshotOnSaveIfEnabled(url: URL) {
+        guard let jjService, jjService.isAvailable, vcsPreferences.snapshotOnSave else { return }
+
+        saveSnapshotDebounceTask?.cancel()
+        saveSnapshotDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 second debounce
+            guard !Task.isCancelled else { return }
+            do {
+                let filename = url.lastPathComponent
+                try await jjService.describe(message: "save: \(filename)")
+                let newChange = try await jjService.newChange()
+
+                try? jjSnapshotStore?.recordSnapshot(
+                    changeId: newChange.changeId,
+                    commitId: newChange.commitId,
+                    description: "save: \(filename)",
+                    snapshotType: .userSave
+                )
+
+                await refreshJJStatus()
+            } catch {
+                // Non-fatal
+            }
+        }
+    }
+
+    private func lastAssistantMessageSummary() -> String {
+        if let last = chatMessages.last(where: { $0.role == .assistant }) {
+            if case .text(let text) = last.kind {
+                let firstLine = text.components(separatedBy: "\n").first ?? text
+                return String(firstLine.prefix(80))
+            }
+        }
+        return "AI change"
+    }
+
+    // MARK: - JJ Actions
+
+    func jjCommit() async {
+        guard let jjService, jjService.isAvailable else { return }
+        do {
+            let files = try await jjService.diffSummary()
+            guard !files.isEmpty else {
+                showToast("No changes to commit")
+                return
+            }
+
+            // Auto-generate a commit message based on detected style
+            let description = "commit: \(files.count) file(s) changed"
+            try await jjService.describe(message: description)
+            _ = try await jjService.newChange()
+
+            try? jjSnapshotStore?.recordSnapshot(
+                changeId: "",
+                commitId: nil,
+                description: description,
+                snapshotType: .manualCommit
+            )
+
+            await refreshJJStatus()
+            showToast("Committed")
+        } catch {
+            appendErrorMessage("Commit failed: \(error.localizedDescription)")
+        }
+    }
+
+    func jjNewChange() async {
+        guard let jjService, jjService.isAvailable else { return }
+        do {
+            _ = try await jjService.newChange()
+            await refreshJJStatus()
+            showToast("New change created")
+        } catch {
+            appendErrorMessage("Failed to create new change: \(error.localizedDescription)")
+        }
+    }
+
+    func jjUndo() async {
+        guard let jjService, jjService.isAvailable else { return }
+        do {
+            try await jjService.undo()
+            await refreshJJStatus()
+            showToast("Undone")
+        } catch {
+            appendErrorMessage("Undo failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - JJ Panel Actions
+
+    func openJJDiff(for file: JJFileDiff) {
+        guard let jjService else { return }
+        Task {
+            do {
+                let diff = try await jjService.diff(paths: [file.path])
+                let url = URL(string: "smithers://diff/jj/\(file.path)")!
+                let tab = DiffTab(
+                    id: url,
+                    title: file.path.split(separator: "/").last.map(String.init) ?? file.path,
+                    summary: "\(file.status.rawValue) \(file.path)",
+                    diff: diff
+                )
+                diffTabs[url] = tab
+                if !openFiles.contains(url) {
+                    openFiles.append(url)
+                }
+                selectedFileURL = url
+            } catch {
+                appendErrorMessage("Failed to get diff: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func openJJChangeDiff(_ change: JJChange) async {
+        guard let jjService else { return }
+        do {
+            let diff = try await jjService.diff(revision: change.changeId)
+            let url = URL(string: "smithers://diff/jj/change/\(change.shortChangeId)")!
+            let tab = DiffTab(
+                id: url,
+                title: change.shortChangeId,
+                summary: change.firstLine,
+                diff: diff
+            )
+            diffTabs[url] = tab
+            if !openFiles.contains(url) {
+                openFiles.append(url)
+            }
+            selectedFileURL = url
+        } catch {
+            appendErrorMessage("Failed to get diff: \(error.localizedDescription)")
+        }
+    }
+
+    func openFileFromJJPanel(_ path: String) {
+        guard let rootDirectory else { return }
+        let url = rootDirectory.appendingPathComponent(path)
+        if !openFiles.contains(url) {
+            openFiles.append(url)
+        }
+        selectedFileURL = url
+    }
+
+    func revertJJFile(_ path: String) async {
+        guard let jjService else { return }
+        do {
+            // Restore the file from the parent change
+            _ = try await jjService.runJJ(["restore", "--from", "@-", path])
+            await refreshJJStatus()
+            // Reload the file if it's currently open
+            if let rootDirectory {
+                let url = rootDirectory.appendingPathComponent(path)
+                if openFiles.contains(url) {
+                    reloadFileContent(url)
+                }
+            }
+            showToast("Reverted \(path)")
+        } catch {
+            appendErrorMessage("Revert failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func reloadFileContent(_ url: URL) {
+        if let content = try? String(contentsOf: url, encoding: .utf8) {
+            savedFileContents[url] = content
+            openFileContents[url] = content
+            if selectedFileURL == url {
+                suppressEditorTextUpdate = true
+                editorText = content
+                suppressEditorTextUpdate = false
+            }
+        }
+    }
+
+    func showJJDescribePrompt() {
+        // Use a simple toast for now — could be enhanced with a text input dialog
+        showToast("Use command palette to describe the working copy")
+    }
+
+    func showJJDescribePromptForChange(_ change: JJChange) {
+        showToast("Describe change \(change.shortChangeId)")
+    }
+
+    func showJJBookmarkPrompt(for change: JJChange) {
+        showToast("Create bookmark for \(change.shortChangeId)")
+    }
+
+    // MARK: - Snapshot Actions
+
+    func revertToSnapshot(_ snapshot: Snapshot) async {
+        guard let jjService, jjService.isAvailable else { return }
+        do {
+            try await jjService.undo()
+            await refreshJJStatus()
+            showToast("Reverted to snapshot")
+        } catch {
+            appendErrorMessage("Revert failed: \(error.localizedDescription)")
+        }
+    }
+
+    func viewSnapshotDiff(_ snapshot: Snapshot) async {
+        guard let jjService else { return }
+        do {
+            let diff = try await jjService.diff(revision: snapshot.changeId)
+            let url = URL(string: "smithers://diff/snapshot/\(snapshot.changeId)")!
+            let tab = DiffTab(
+                id: url,
+                title: "Snapshot \(String(snapshot.changeId.prefix(8)))",
+                summary: snapshot.description,
+                diff: diff
+            )
+            diffTabs[url] = tab
+            if !openFiles.contains(url) {
+                openFiles.append(url)
+            }
+            selectedFileURL = url
+        } catch {
+            appendErrorMessage("Failed to get snapshot diff: \(error.localizedDescription)")
+        }
+    }
+
+    func navigateToSnapshotChat(_ snapshot: Snapshot) {
+        if let sessionId = snapshot.chatSessionId {
+            // Switch to the chat session
+            activeChatId = sessionId
+        }
+    }
+
+    func showSnapshotBrowser() {
+        // Toggle the snapshot browser panel
+        showToast("Snapshot browser")
+    }
+
+    // MARK: - Agent Actions
+
+    func showNewAgentPrompt() {
+        showToast("Use chat to spawn agents: 'Run an agent to...'")
+    }
+
+    func switchToAgentChat(_ agent: AgentWorkspace) {
+        activeChatId = agent.chatSessionId
+    }
+
+    func viewAgentDiff(_ agent: AgentWorkspace) async {
+        guard let jjService else { return }
+        do {
+            let diff = try await jjService.diff(revision: agent.changeId)
+            let url = URL(string: "smithers://diff/agent/\(agent.id)")!
+            let tab = DiffTab(
+                id: url,
+                title: "Agent: \(agent.id)",
+                summary: agent.task,
+                diff: diff
+            )
+            diffTabs[url] = tab
+            if !openFiles.contains(url) {
+                openFiles.append(url)
+            }
+            selectedFileURL = url
+        } catch {
+            appendErrorMessage("Failed to get agent diff: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Revert Chat Message (JJ)
+
+    func canRevertJJMessage(_ message: ChatMessage) -> Bool {
+        guard let jjService, jjService.isAvailable else { return false }
+        guard message.role == .assistant else { return false }
+        guard message.turnId != nil else { return false }
+        guard !isTurnInProgress else { return false }
+        // Check if there's a snapshot for this message
+        if let store = jjSnapshotStore,
+           let sessionId = activeChatId as String?,
+           let idx = chatMessages.firstIndex(where: { $0.id == message.id }) {
+            let snapshot = try? store.snapshotForMessage(sessionId: sessionId, messageIndex: idx)
+            return snapshot != nil
+        }
+        return false
+    }
+
+    func revertJJMessage(_ message: ChatMessage) async {
+        guard let jjService, jjService.isAvailable else { return }
+        do {
+            try await jjService.undo()
+            await refreshJJStatus()
+            showToast("Reverted agent changes")
+        } catch {
+            appendErrorMessage("Revert failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func rebuildPaletteCommands() {
+        paletteCommands = buildCommandList()
+    }
 }

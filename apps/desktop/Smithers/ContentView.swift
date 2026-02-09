@@ -442,7 +442,7 @@ struct CodeEditor: NSViewRepresentable {
         }
     }
 
-    @MainActor class Coordinator: NSObject, STTextViewDelegate {
+    @MainActor class Coordinator: NSObject, @preconcurrency STTextViewDelegate {
         var parent: CodeEditor
         var ignoreNextChange = false
         var highlighter: TreeSitterHighlighter?
@@ -503,6 +503,11 @@ struct CodeEditor: NSViewRepresentable {
                 }
                 self.scrollView = scrollView
                 self.textView = textView
+                if let multiCursorTextView = textView as? MultiCursorTextView {
+                    multiCursorTextView.commandHandler = { [weak self] selector in
+                        self?.handleCommand(selector) ?? false
+                    }
+                }
                 self.lineNumberView = scrollView.verticalRulerView as? STLineNumberRulerView
                 if magnificationRecognizer == nil {
                     let recognizer = NSMagnificationGestureRecognizer(
@@ -517,10 +522,12 @@ struct CodeEditor: NSViewRepresentable {
                     object: scrollView.contentView,
                     queue: .main
                 ) { [weak self] _ in
-                    guard let self, let textView = self.textView, let scrollView = self.scrollView else { return }
-                    self.updateScrollMetrics(textView: textView, scrollView: scrollView)
-                    self.saveViewState(for: self.currentFileURL, textView: textView, scrollView: scrollView)
-                    self.scrollbarView?.notifyScrollActivity()
+                    Task { @MainActor [weak self] in
+                        guard let self, let textView = self.textView, let scrollView = self.scrollView else { return }
+                        self.updateScrollMetrics(textView: textView, scrollView: scrollView)
+                        self.saveViewState(for: self.currentFileURL, textView: textView, scrollView: scrollView)
+                        self.scrollbarView?.notifyScrollActivity()
+                    }
                 }
             }
 
@@ -780,8 +787,10 @@ struct CodeEditor: NSViewRepresentable {
             ]
             for name in names {
                 let token = center.addObserver(forName: name, object: window, queue: .main) { [weak self, weak textView] _ in
-                    guard let self, let textView else { return }
-                    self.refreshCursorPosition(textView: textView, restartBlink: false)
+                    Task { @MainActor [weak self, weak textView] in
+                        guard let self, let textView else { return }
+                        self.refreshCursorPosition(textView: textView, restartBlink: false)
+                    }
                 }
                 cursorObservers.append(token)
             }
@@ -955,8 +964,8 @@ struct CodeEditor: NSViewRepresentable {
             refreshCursorPosition(textView: textView, restartBlink: false)
         }
 
-        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            guard let textView = textView as? STTextView else { return false }
+        private func handleCommand(_ commandSelector: Selector) -> Bool {
+            guard let textView else { return false }
             if commandSelector == #selector(NSResponder.insertTab(_:)) {
                 if !ghostText.isEmpty {
                     applyGhostText(textView: textView)
@@ -987,18 +996,18 @@ struct CodeEditor: NSViewRepresentable {
         }
 
         func textView(
-            _ textView: NSTextView,
-            shouldChangeTextIn affectedCharRange: NSRange,
+            _ textView: STTextView,
+            shouldChangeTextIn affectedCharRange: NSTextRange,
             replacementString: String?
         ) -> Bool {
-            guard let textView = textView as? STTextView else { return true }
             if isApplyingCompletion {
                 return true
             }
             cancelPendingCompletion()
             cancelInFlightCompletion()
             guard !ghostText.isEmpty else { return true }
-            guard let replacementString, !replacementString.isEmpty, affectedCharRange.length == 0 else {
+            let nsRange = NSRange(affectedCharRange, in: textView.textContentManager)
+            guard let replacementString, !replacementString.isEmpty, nsRange.length == 0 else {
                 clearGhostText(textView: textView)
                 return true
             }
@@ -1006,7 +1015,7 @@ struct CodeEditor: NSViewRepresentable {
                 let dropCount = replacementString.count
                 ghostText = String(ghostText.dropFirst(dropCount))
                 let utf16Count = (replacementString as NSString).length
-                ghostAnchor = affectedCharRange.location + utf16Count
+                ghostAnchor = nsRange.location + utf16Count
                 suppressNextCompletionRequest = true
                 if ghostText.isEmpty {
                     clearGhostText(textView: textView)
@@ -1475,7 +1484,21 @@ struct ContentView: View {
 
         ZStack {
             NavigationSplitView(columnVisibility: $workspace.sidebarVisibility) {
-                FileTreeSidebar(workspace: workspace)
+                VStack(spacing: 0) {
+                    // Sidebar mode tabs
+                    if workspace.jjService?.isAvailable == true {
+                        SidebarModeBar(workspace: workspace)
+                        Divider().background(workspace.theme.dividerColor)
+                    }
+
+                    if workspace.isJJPanelVisible {
+                        JJPanelView(workspace: workspace)
+                    } else if workspace.isAgentDashboardVisible {
+                        AgentDashboardView(workspace: workspace)
+                    } else {
+                        FileTreeSidebar(workspace: workspace)
+                    }
+                }
                     .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 400)
                     .overlay(SidebarResizeHandle(theme: workspace.theme), alignment: .trailing)
                     .overlay(FocusRing(isActive: focusedPane == .sidebar, theme: workspace.theme))
@@ -1567,7 +1590,6 @@ struct ContentView: View {
                                                     scrollbarMode: workspace.scrollbarVisibilityMode,
                                                     scrollbarMetrics: nvimScrollbarMetrics,
                                                     theme: workspace.theme,
-                                                    floatingWindowEffects: workspace.nvimFloatingWindowEffects,
                                                     onScrollToOffset: { offset in
                                                         let topLine = Int(offset.rounded()) + 1
                                                         workspace.scrollNvimToTopLine(topLine)
@@ -1575,7 +1597,8 @@ struct ContentView: View {
                                                     onPageScroll: { direction in
                                                         let lines = workspace.nvimViewport?.visibleLineCount ?? 1
                                                         workspace.scrollNvimByLines(lines * direction)
-                                                    }
+                                                    },
+                                                    floatingWindowEffects: workspace.nvimFloatingWindowEffects
                                                 )
                                                 NvimExtUIOverlay(workspace: workspace)
                                                     .allowsHitTesting(false)
@@ -1697,6 +1720,20 @@ struct ContentView: View {
         .animation(.spring(duration: 0.25, bounce: 0.15), value: workspace.isCommandPalettePresented)
         .animation(.easeInOut(duration: 0.2), value: workspace.isProgressBarVisible)
         .animation(.easeInOut(duration: 0.2), value: workspace.isShortcutsPanelVisible)
+        .sheet(item: $workspace.activeSkillModal) { modal in
+            switch modal {
+            case .browse:
+                SkillBrowserView(workspace: workspace)
+            case .manage:
+                SkillListView(workspace: workspace)
+            case .use:
+                SkillUseView(workspace: workspace)
+            case .create:
+                CreateSkillWizardView(workspace: workspace)
+            case .detail(let skill):
+                SkillDetailView(skill: skill, workspace: workspace)
+            }
+        }
         .background(workspace.theme.backgroundColor)
     }
 
@@ -1983,6 +2020,7 @@ private struct BreadcrumbBar: View {
 private struct StatusBar: View {
     @ObservedObject var workspace: WorkspaceState
     let height: CGFloat
+    @State private var showSkillsPopover = false
 
     var body: some View {
         let theme = workspace.theme
@@ -2010,6 +2048,18 @@ private struct StatusBar: View {
 
             Spacer()
 
+            if !workspace.activeSkills.isEmpty {
+                Button("Skills: \(skillsSummary)") {
+                    showSkillsPopover.toggle()
+                }
+                .buttonStyle(.borderless)
+                .popover(isPresented: $showSkillsPopover) {
+                    ActiveSkillsPopover(workspace: workspace)
+                        .frame(minWidth: 220)
+                        .padding(10)
+                }
+            }
+
             Text(workspace.currentLanguage?.name ?? "Plain Text")
             Text("Spaces: 4")
         }
@@ -2018,6 +2068,58 @@ private struct StatusBar: View {
         .padding(.horizontal, 12)
         .frame(height: height)
         .background(theme.secondaryBackgroundColor)
+    }
+
+    private var skillsSummary: String {
+        let names = workspace.activeSkills.map { $0.skill.name }
+        if names.count <= 2 {
+            return names.joined(separator: ", ")
+        }
+        return "\(names.prefix(2).joined(separator: ", ")) +\(names.count - 2)"
+    }
+}
+
+private struct ActiveSkillsPopover: View {
+    @ObservedObject var workspace: WorkspaceState
+
+    var body: some View {
+        let active = workspace.activeSkills
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Active Skills")
+                .font(.system(size: Typography.s, weight: .semibold))
+            if active.isEmpty {
+                Text("No active skills")
+                    .font(.system(size: Typography.s))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(active) { activeSkill in
+                    Toggle(
+                        activeSkill.skill.name,
+                        isOn: Binding(
+                            get: { workspace.isSkillActive(activeSkill.skill) },
+                            set: { enabled in
+                                if !enabled {
+                                    workspace.deactivateSkill(activeSkill.skill)
+                                }
+                            }
+                        )
+                    )
+                }
+            }
+            Divider()
+            HStack {
+                Button("Add Skills") {
+                    workspace.showSkillUse()
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+                Button("Clear All") {
+                    workspace.deactivateAllSkills()
+                }
+                .buttonStyle(.bordered)
+                .disabled(active.isEmpty)
+            }
+        }
     }
 }
 
@@ -2210,7 +2312,9 @@ struct TabBar: View {
             let isWebview = workspace.isWebviewURL(url)
             let diffInfo = isDiff ? workspace.diffTab(for: url) : nil
             let webviewInfo = isWebview ? workspace.webviewTab(for: url) : nil
-            let diffSubtitle = diffInfo?.summary.isEmpty == false ? diffInfo?.summary : "Diff view"
+            let diffSubtitle = (diffInfo?.summary.isEmpty == false)
+                ? (diffInfo?.summary ?? "Diff view")
+                : "Diff view"
             let isModified = workspace.isFileModified(url)
             tabItemModifiers(
                 TabBarItem(
@@ -2317,5 +2421,68 @@ struct TabBar: View {
             return "globe"
         }
         return iconForFile(url.lastPathComponent)
+    }
+}
+
+// MARK: - Sidebar Mode Bar
+
+struct SidebarModeBar: View {
+    @ObservedObject var workspace: WorkspaceState
+
+    var body: some View {
+        let theme = workspace.theme
+        HStack(spacing: 0) {
+            sidebarButton(
+                icon: "doc.text",
+                label: "Files",
+                isActive: !workspace.isJJPanelVisible && !workspace.isAgentDashboardVisible,
+                theme: theme
+            ) {
+                workspace.isJJPanelVisible = false
+                workspace.isAgentDashboardVisible = false
+            }
+
+            sidebarButton(
+                icon: "arrow.triangle.branch",
+                label: "Source",
+                isActive: workspace.isJJPanelVisible,
+                theme: theme
+            ) {
+                workspace.isJJPanelVisible = true
+                workspace.isAgentDashboardVisible = false
+            }
+
+            if workspace.agentOrchestrator != nil {
+                sidebarButton(
+                    icon: "person.3",
+                    label: "Agents",
+                    isActive: workspace.isAgentDashboardVisible,
+                    theme: theme
+                ) {
+                    workspace.isAgentDashboardVisible = true
+                    workspace.isJJPanelVisible = false
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(theme.secondaryBackgroundColor)
+    }
+
+    private func sidebarButton(icon: String, label: String, isActive: Bool, theme: AppTheme, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: Typography.base))
+                Text(label)
+                    .font(.system(size: Typography.xs))
+            }
+            .foregroundStyle(isActive ? theme.accentColor : theme.mutedForegroundColor)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+            .background(isActive ? theme.accentColor.opacity(0.1) : Color.clear)
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
     }
 }
