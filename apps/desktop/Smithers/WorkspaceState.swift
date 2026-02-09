@@ -87,15 +87,36 @@ struct DiffTab: Identifiable, Hashable {
     let diff: String
 }
 
+enum NvimFailureKind: String {
+    case startup
+    case crash
+}
+
+struct NvimFailure: Identifiable, Equatable {
+    let id = UUID()
+    let kind: NvimFailureKind
+    let message: String
+    let detail: String?
+    let timestamp: Date
+    let reportURL: URL?
+    let logURL: URL?
+}
+
 @MainActor
 class WorkspaceState: ObservableObject {
     enum NvimModeError: Error, LocalizedError {
         case missingWorkspace
+        case recoveryRequired
+        case startupExited
 
         var errorDescription: String? {
             switch self {
             case .missingWorkspace:
                 return "Open a folder before enabling Neovim mode."
+            case .recoveryRequired:
+                return "Restart Neovim to continue."
+            case .startupExited:
+                return "Neovim exited during startup."
             }
         }
     }
@@ -157,6 +178,7 @@ class WorkspaceState: ObservableObject {
             updateWindowTitle()
         }
     }
+    @Published private(set) var nvimFailure: NvimFailure?
     @Published var editorText: String = """
     func hello() {
         print("Hello, Smithers!")
@@ -208,6 +230,16 @@ class WorkspaceState: ObservableObject {
     @Published private(set) var nvimMode: NvimModeKind = .normal
     @Published var cursorLine: Int = 1
     @Published var cursorColumn: Int = 1
+    @Published var isCloseWarningEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: WorkspaceState.closeWarningEnabledKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: WorkspaceState.closeWarningEnabledKey)
+    }() {
+        didSet {
+            UserDefaults.standard.set(isCloseWarningEnabled, forKey: Self.closeWarningEnabledKey)
+        }
+    }
     @Published var isAutoSaveEnabled: Bool = UserDefaults.standard.bool(
         forKey: WorkspaceState.autoSaveEnabledKey
     ) {
@@ -310,9 +342,30 @@ class WorkspaceState: ObservableObject {
     @Published var toastMessage: String?
     @Published private(set) var progressValue: Double = 0
     @Published private(set) var isProgressBarVisible: Bool = false
-    @Published var progressBarHeight: CGFloat = 3
-    @Published var progressBarFillColor: NSColor?
-    @Published var progressBarTrackColor: NSColor?
+    @Published var progressBarHeight: CGFloat = {
+        let value = UserDefaults.standard.double(forKey: WorkspaceState.progressBarHeightKey)
+        if value > 0 { return WorkspaceState.clampProgressBarHeight(CGFloat(value)) }
+        return 3
+    }() {
+        didSet {
+            let clamped = Self.clampProgressBarHeight(progressBarHeight)
+            if clamped != progressBarHeight {
+                progressBarHeight = clamped
+                return
+            }
+            UserDefaults.standard.set(Double(clamped), forKey: Self.progressBarHeightKey)
+        }
+    }
+    @Published var progressBarFillColor: NSColor? = WorkspaceState.loadProgressColor(key: WorkspaceState.progressBarFillColorKey) {
+        didSet {
+            Self.storeProgressColor(progressBarFillColor, key: Self.progressBarFillColorKey)
+        }
+    }
+    @Published var progressBarTrackColor: NSColor? = WorkspaceState.loadProgressColor(key: WorkspaceState.progressBarTrackColorKey) {
+        didSet {
+            Self.storeProgressColor(progressBarTrackColor, key: Self.progressBarTrackColorKey)
+        }
+    }
     @Published var pendingSelection: EditorSelection?
     private var fileLoadTask: Task<Void, Never>?
     private var fileIndex: [FileIndexEntry] = []
@@ -360,10 +413,15 @@ class WorkspaceState: ObservableObject {
     private static let maxPreviewBytes = 200_000
     private static let previewContextLines = 2
     private static let maxSessionEntries = 20
+    private static let closeWarningEnabledKey = "smithers.closeWarningsEnabled"
     private static let autoSaveEnabledKey = "smithers.autoSaveEnabled"
     private static let autoSaveIntervalKey = "smithers.autoSaveInterval"
     private static let defaultAutoSaveInterval: TimeInterval = 5
+    static let progressBarHeightRange: ClosedRange<CGFloat> = 1...8
     private static let progressBarAutoHideDelay: TimeInterval = 0.45
+    private static let progressBarHeightKey = "smithers.progressBarHeight"
+    private static let progressBarFillColorKey = "smithers.progressBarFillColor"
+    private static let progressBarTrackColorKey = "smithers.progressBarTrackColor"
     private static let editorFontNameKey = "smithers.editorFontName"
     private static let editorFontSizeKey = "smithers.editorFontSize"
     private static let nvimPathKey = "smithers.nvimPath"
@@ -375,6 +433,7 @@ class WorkspaceState: ObservableObject {
     static let maxEditorFontSize: Double = 32
     private var terminalCounter = 0
     private let ghosttyApp = GhosttyApp.shared
+    private var nvimLogFileURL: URL?
     private var nvimController: NvimController?
     private var nvimStartTask: Task<NvimController, Error>?
     private var codexService: CodexService?
@@ -885,24 +944,26 @@ class WorkspaceState: ObservableObject {
     }
 
     func shouldBypassCloseGuards() -> Bool {
-        closeGuardsBypassed
+        closeGuardsBypassed || !isCloseWarningEnabled
     }
 
     private func closeDecisionForTab(_ url: URL) async -> CloseDecision {
-        if closeGuardsBypassed || !isRegularFileURL(url) {
+        if closeGuardsBypassed || !isCloseWarningEnabled || !isRegularFileURL(url) {
             return .allow(force: false)
         }
         if isNvimModeEnabled {
-            guard let buffers = await fetchModifiedNvimBuffers() else {
+            guard let controller = nvimController else { return .allow(force: false) }
+            do {
+                let buffers = try await controller.listModifiedBuffersInTab(containing: url)
+                guard !buffers.isEmpty else { return .allow(force: false) }
+                let names = uniqueBufferNames(from: buffers)
+                let confirmed = confirmDiscardChanges(context: .tab(url), names: names)
+                return confirmed ? .allow(force: true) : .deny
+            } catch {
+                Self.debugLog("[WorkspaceState] listModifiedBuffersInTab error: \(error)")
                 let confirmed = confirmUnableToCheck(context: .tab(url))
                 return confirmed ? .allow(force: true) : .deny
             }
-            let normalized = url.standardizedFileURL
-            let matching = buffers.filter { $0.url?.standardizedFileURL == normalized }
-            guard !matching.isEmpty else { return .allow(force: false) }
-            let names = uniqueBufferNames(from: matching)
-            let confirmed = confirmDiscardChanges(context: .tab(url), names: names)
-            return confirmed ? .allow(force: true) : .deny
         }
 
         if isNativeFileModified(url) {
@@ -913,7 +974,7 @@ class WorkspaceState: ObservableObject {
     }
 
     private func confirmCloseIfNeeded(context: CloseContext) async -> Bool {
-        if closeGuardsBypassed {
+        if closeGuardsBypassed || !isCloseWarningEnabled {
             return true
         }
         var names: [String] = []
@@ -948,9 +1009,18 @@ class WorkspaceState: ObservableObject {
         alert.alertStyle = .warning
         switch context {
         case .tab(let url):
-            let name = names.first ?? displayPath(for: url)
-            alert.messageText = "The file \"\(name)\" has unsaved changes."
-            alert.informativeText = "Closing this tab will discard your changes."
+            if count == 1 {
+                let name = names.first ?? displayPath(for: url)
+                alert.messageText = "The file \"\(name)\" has unsaved changes."
+                alert.informativeText = "Closing this tab will discard your changes."
+            } else {
+                let fileWord = count == 1 ? "file" : "files"
+                alert.messageText = "You have unsaved changes in \(count) \(fileWord)."
+                alert.informativeText = buildCloseInfo(
+                    listText: listText,
+                    actionText: "Closing this tab will discard these changes."
+                )
+            }
             alert.addButton(withTitle: "Close Tab")
         case .window:
             let fileWord = count == 1 ? "file" : "files"
@@ -2412,7 +2482,21 @@ class WorkspaceState: ObservableObject {
         }
     }
 
-    func setProgress(_ value: Double) {
+    func setProgress(
+        _ value: Double,
+        height: CGFloat? = nil,
+        fillColor: NSColor? = nil,
+        trackColor: NSColor? = nil
+    ) {
+        if let height {
+            progressBarHeight = height
+        }
+        if let fillColor {
+            progressBarFillColor = fillColor
+        }
+        if let trackColor {
+            progressBarTrackColor = trackColor
+        }
         let sanitized = value.isFinite ? value : 0
         let clamped = min(max(sanitized, 0), 1)
         progressHideToken += 1
@@ -2430,6 +2514,27 @@ class WorkspaceState: ObservableObject {
                 self.isProgressBarVisible = false
                 self.progressValue = 0
             }
+        }
+    }
+
+    private static func clampProgressBarHeight(_ value: CGFloat) -> CGFloat {
+        min(max(value, progressBarHeightRange.lowerBound), progressBarHeightRange.upperBound)
+    }
+
+    private static func loadProgressColor(key: String) -> NSColor? {
+        guard let hex = UserDefaults.standard.string(forKey: key) else { return nil }
+        return NSColor.fromHex(hex)
+    }
+
+    private static func storeProgressColor(_ color: NSColor?, key: String) {
+        guard let color else {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
+        }
+        if let hex = color.toHexString(includeAlpha: true) {
+            UserDefaults.standard.set(hex, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
         }
     }
 
