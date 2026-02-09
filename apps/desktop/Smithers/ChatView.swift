@@ -513,11 +513,39 @@ struct ChatBubble: View {
 
 struct MessageActionBar: View {
     let message: ChatMessage
-    @ObservedObject var workspace: WorkspaceState
+    let workspace: WorkspaceState
 
     var body: some View {
+        let canFork = workspace.canForkMessage(message)
+        let canCopy = workspace.canCopyMessage(message)
+        let canRetry = workspace.canRetryMessage(message)
+        let canEdit = workspace.canEditMessage(message)
+        let canRollback = workspace.canRollbackToMessage(message)
+        let hasAny = canFork || canCopy || canRetry || canEdit || canRollback
+
+        return Group {
+            if hasAny {
+                actionBar(
+                    canFork: canFork,
+                    canCopy: canCopy,
+                    canRetry: canRetry,
+                    canEdit: canEdit,
+                    canRollback: canRollback
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actionBar(
+        canFork: Bool,
+        canCopy: Bool,
+        canRetry: Bool,
+        canEdit: Bool,
+        canRollback: Bool
+    ) -> some View {
         HStack(spacing: 6) {
-            if workspace.canForkMessage(message) {
+            if canFork {
                 Button {
                     workspace.forkChat(from: message)
                 } label: {
@@ -528,7 +556,7 @@ struct MessageActionBar: View {
                 .help("Fork from here")
             }
 
-            if workspace.canCopyMessage(message) {
+            if canCopy {
                 Button {
                     workspace.copyChatMessage(message)
                 } label: {
@@ -539,7 +567,7 @@ struct MessageActionBar: View {
                 .help("Copy message")
             }
 
-            if workspace.canRetryMessage(message) {
+            if canRetry {
                 Button {
                     workspace.retryFromMessage(message)
                 } label: {
@@ -550,7 +578,7 @@ struct MessageActionBar: View {
                 .help("Retry")
             }
 
-            if workspace.canEditMessage(message) {
+            if canEdit {
                 Button {
                     workspace.editAndResendMessage(message)
                 } label: {
@@ -561,19 +589,18 @@ struct MessageActionBar: View {
                 .help("Edit & resend")
             }
 
-            Menu {
-                if workspace.canRollbackToMessage(message) {
+            if canRollback {
+                Menu {
                     Button("Rollback to here") {
                         workspace.rollbackChat(to: message)
                     }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 10, weight: .semibold))
                 }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 10, weight: .semibold))
+                .frame(width: 18, height: 18)
+                .help("More")
             }
-            .menuStyle(.borderlessButton)
-            .frame(width: 18, height: 18)
-            .help("More")
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
