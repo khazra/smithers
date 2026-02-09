@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 struct ScrollbarMetrics: Equatable {
     var contentLength: CGFloat
