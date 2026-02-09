@@ -72,6 +72,11 @@ final class NvimController {
     private(set) var terminalView: GhosttyTerminalView
     private let smoothScrollController: SmoothScrollController
     private var notificationsTask: Task<Void, Never>?
+    private var initialSyncTask: Task<Void, Error>?
+    private var uiResizeTask: Task<Void, Never>?
+    private var uiAttachTask: Task<Void, Never>?
+    private var pendingRedraw: [MsgPackValue]?
+    private var redrawCoalesceTask: Task<Void, Never>?
     private var isRunning = false
     private var isReady = false
     private var bufferByURL: [URL: Int64] = [:]
@@ -84,6 +89,7 @@ final class NvimController {
     private var gridPositions: [Int64: GridPosition] = [1: GridPosition(row: 0, col: 0)]
     private var floatingWindows: [Int64: FloatingWindowState] = [:]
     private var lastPublishedFloatingWindows: [NvimFloatingWindow] = []
+    private var hitTestFloatingWindows: [NvimFloatingWindow] = []
     private static let highlightGroups: [String] = [
         "Normal",
         "TabLine",
@@ -167,6 +173,15 @@ final class NvimController {
     }
 
     func stop() {
+        initialSyncTask?.cancel()
+        initialSyncTask = nil
+        uiResizeTask?.cancel()
+        uiResizeTask = nil
+        uiAttachTask?.cancel()
+        uiAttachTask = nil
+        redrawCoalesceTask?.cancel()
+        redrawCoalesceTask = nil
+        pendingRedraw = nil
         notificationsTask?.cancel()
         notificationsTask = nil
         stopGridMetricsObservation()
@@ -185,7 +200,9 @@ final class NvimController {
     private func startGridMetricsObservation() {
         guard gridMetricsObserver == nil else { return }
         gridMetricsObserver = terminalView.addGridMetricsObserver { [weak self] metrics in
-            self?.handleGridMetricsChange(metrics)
+            Task { @MainActor [weak self] in
+                self?.handleGridMetricsChange(metrics)
+            }
         }
     }
 
@@ -201,8 +218,9 @@ final class NvimController {
         if uiAttached {
             if lastUiSize?.columns != size.columns || lastUiSize?.rows != size.rows {
                 lastUiSize = size
-                Task { [weak self] in
-                    guard let self else { return }
+                uiResizeTask?.cancel()
+                uiResizeTask = Task { [weak self] in
+                    guard let self, self.isRunning, !Task.isCancelled else { return }
                     _ = try? await self.rpc.request(
                         "nvim_ui_try_resize",
                         params: [.int(Int64(size.columns)), .int(Int64(size.rows))]
@@ -212,8 +230,10 @@ final class NvimController {
             return
         }
 
-        Task { [weak self] in
-            try? await self?.attachUiIfNeeded()
+        uiAttachTask?.cancel()
+        uiAttachTask = Task { [weak self] in
+            guard let self, self.isRunning, !Task.isCancelled else { return }
+            try? await self.attachUiIfNeeded()
         }
     }
 
@@ -259,12 +279,13 @@ final class NvimController {
         gridPositions = [1: GridPosition(row: 0, col: 0)]
         floatingWindows.removeAll()
         lastPublishedFloatingWindows = []
+        hitTestFloatingWindows = []
         workspace?.setNvimFloatingWindows([])
     }
 
     func setGlobalVariables(_ variables: [String: MsgPackValue]) async {
         guard !variables.isEmpty else { return }
-        await waitUntilReady()
+        guard (try? await waitUntilReady()) != nil else { return }
         let script = """
         local vars = ...
         for key, value in pairs(vars) do
@@ -276,7 +297,7 @@ final class NvimController {
 
     func setOptions(_ options: [String: MsgPackValue]) async {
         guard !options.isEmpty else { return }
-        await waitUntilReady()
+        guard (try? await waitUntilReady()) != nil else { return }
         let script = """
         local opts = ...
         for key, value in pairs(opts) do
@@ -291,7 +312,7 @@ final class NvimController {
     // and math.max(1, <userdata>) crashed. Fixed to use type(line) == "number".
     func openFile(_ url: URL, line: Int? = nil, column: Int? = nil) async throws {
         WorkspaceState.debugLog("[NvimController] openFile: \(url.lastPathComponent), isReady=\(isReady)")
-        await waitUntilReady()
+        try await waitUntilReady()
         WorkspaceState.debugLog("[NvimController] openFile: waitUntilReady done, isReady=\(isReady)")
         let normalizedURL = url.standardizedFileURL
         let path = normalizedURL.path
@@ -391,7 +412,7 @@ final class NvimController {
     }
 
     func listModifiedBuffers() async throws -> [NvimModifiedBuffer] {
-        await waitUntilReady()
+        try await waitUntilReady()
         let script = """
         local out = {}
         for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -408,7 +429,7 @@ final class NvimController {
     }
 
     func listModifiedBuffersInTab(containing url: URL) async throws -> [NvimModifiedBuffer] {
-        await waitUntilReady()
+        try await waitUntilReady()
         let normalizedURL = url.standardizedFileURL
         let path = normalizedURL.path
         let buf = bufferByURL[normalizedURL] ?? 0
@@ -466,17 +487,17 @@ final class NvimController {
     }
 
     func saveCurrent() async throws {
-        await waitUntilReady()
+        try await waitUntilReady()
         _ = try await rpc.request("nvim_command", params: [.string("write")])
     }
 
     func saveAll() async throws {
-        await waitUntilReady()
+        try await waitUntilReady()
         _ = try await rpc.request("nvim_command", params: [.string("wall")])
     }
 
     func scrollToTopLine(_ topLine: Int) async {
-        await waitUntilReady()
+        guard (try? await waitUntilReady()) != nil else { return }
         let script = """
         local top = ...
         local win = vim.api.nvim_get_current_win()
@@ -494,7 +515,7 @@ final class NvimController {
     }
 
     func scrollByLines(_ delta: Int) async {
-        await waitUntilReady()
+        guard (try? await waitUntilReady()) != nil else { return }
         let script = """
         local delta = ...
         local win = vim.api.nvim_get_current_win()
@@ -517,7 +538,7 @@ final class NvimController {
         row: Int,
         col: Int
     ) async {
-        await waitUntilReady()
+        guard (try? await waitUntilReady()) != nil else { return }
         let params: [MsgPackValue] = [
             .string("wheel"),
             .string(direction.nvimAction),
@@ -547,19 +568,34 @@ final class NvimController {
         if isReady { return }
         let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
+            try Task.checkCancellation()
+            if !isRunning {
+                throw CancellationError()
+            }
             if let didEnter = try? await getVimDidEnter(), didEnter {
                 return
             }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
+        throw ControllerError.connectTimeout
     }
 
-    private func waitUntilReady(timeout: TimeInterval = 20) async {
+    private func waitUntilReady(timeout: TimeInterval = 20) async throws {
         if isReady { return }
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if isReady { return }
-            try? await Task.sleep(nanoseconds: 50_000_000)
+        guard let initialSyncTask else { throw ControllerError.connectTimeout }
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                _ = try await initialSyncTask.value
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw ControllerError.connectTimeout
+            }
+            _ = try await group.next()
+            group.cancelAll()
+        }
+        if !isReady {
+            throw ControllerError.connectTimeout
         }
     }
 
@@ -576,21 +612,26 @@ final class NvimController {
 
     private func scheduleInitialSync() {
         if isReady { return }
-        Task { [weak self] in
+        initialSyncTask?.cancel()
+        initialSyncTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            _ = try? await self.waitForVimEnter()
+            guard self.isRunning else { return }
+            try await self.waitForVimEnter()
             WorkspaceState.debugLog("[NvimController] VimEnter done, sleeping 1.5s for plugins")
             try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled, self.isRunning else { return }
             do {
                 try await self.syncInitialBuffers()
                 WorkspaceState.debugLog("[NvimController] syncInitialBuffers completed OK")
             } catch {
                 WorkspaceState.debugLog("[NvimController] syncInitialBuffers error: \(error)")
             }
+            guard !Task.isCancelled, self.isRunning else { return }
             await self.refreshColorscheme(reason: "initial")
             WorkspaceState.debugLog("[NvimController] setting isReady = true")
             self.isReady = true
             self.workspace?.handleNvimReady()
+            guard !Task.isCancelled, self.isRunning else { return }
             await self.syncModifiedBuffers()
         }
     }
@@ -724,7 +765,16 @@ final class NvimController {
 
     private func handleNotification(method: String, params: [MsgPackValue]) async {
         if method == "redraw" {
-            handleRedraw(params: params)
+            pendingRedraw = params
+            if redrawCoalesceTask == nil {
+                redrawCoalesceTask = Task { @MainActor [weak self] in
+                    defer { self?.redrawCoalesceTask = nil }
+                    await Task.yield()
+                    guard let self, let latest = self.pendingRedraw else { return }
+                    self.pendingRedraw = nil
+                    self.handleRedraw(params: latest)
+                }
+            }
             return
         }
         if method == "smithers/colorscheme" {
@@ -1016,6 +1066,10 @@ final class NvimController {
 
         if windows != lastPublishedFloatingWindows {
             lastPublishedFloatingWindows = windows
+            hitTestFloatingWindows = windows.sorted {
+                if $0.zIndex == $1.zIndex { return $0.id > $1.id }
+                return $0.zIndex > $1.zIndex
+            }
             workspace?.setNvimFloatingWindows(windows)
         }
     }
@@ -1047,16 +1101,11 @@ final class NvimController {
     }
 
     private func resolveGridLocation(row: Int, col: Int) -> (gridId: Int64, row: Int, col: Int) {
-        guard !lastPublishedFloatingWindows.isEmpty else {
+        guard !hitTestFloatingWindows.isEmpty else {
             return (gridId: 1, row: row, col: col)
         }
 
-        let ordered = lastPublishedFloatingWindows.sorted {
-            if $0.zIndex == $1.zIndex { return $0.id > $1.id }
-            return $0.zIndex > $1.zIndex
-        }
-
-        for window in ordered {
+        for window in hitTestFloatingWindows {
             let startRow = Int(floor(window.row))
             let startCol = Int(floor(window.col))
             let endRow = startRow + max(window.height, 0)
@@ -1105,31 +1154,33 @@ final class NvimController {
     }
 
     private func syncInitialBuffers() async throws {
-        let buffers = try await rpc.request("nvim_list_bufs", params: [])
-        guard case let .array(values) = buffers else { return }
-
-        for value in values {
-            guard let buf = value.intValue else { continue }
-            let nameValue = try await rpc.request("nvim_buf_get_name", params: [.int(buf)])
-            guard let name = nameValue.stringValue, !name.isEmpty else { continue }
-            let listedValue = try await rpc.request(
-                "nvim_buf_get_option",
-                params: [.int(buf), .string("buflisted")]
-            )
-            let listed: Bool
-            if let b = listedValue.boolValue {
-                listed = b
-            } else if let i = listedValue.intValue {
-                listed = i != 0
-            } else {
-                continue
+        let script = """
+        local out = {}
+        for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+          if vim.api.nvim_buf_is_loaded(buf) then
+            local name = vim.api.nvim_buf_get_name(buf)
+            if name and name ~= "" then
+              local listed = vim.bo[buf].buflisted
+              table.insert(out, { buf = buf, name = name, listed = listed })
+            end
+          end
+        end
+        local cur = vim.api.nvim_get_current_buf()
+        return { buffers = out, current = cur }
+        """
+        let response = try await rpc.request("nvim_exec_lua", params: [.string(script), .array([])])
+        guard case let .map(values) = response else { return }
+        if case let .array(buffers) = values["buffers"] {
+            for entry in buffers {
+                guard case let .map(map) = entry else { continue }
+                let buf = map["buf"]?.intValue ?? 0
+                let name = map["name"]?.stringValue ?? ""
+                let listed = parseBool(map["listed"]) ?? false
+                guard listed, !name.isEmpty else { continue }
+                handleBufferEnter(buf: buf, name: name, select: false)
             }
-            guard listed else { continue }
-            handleBufferEnter(buf: buf, name: name, select: false)
         }
-
-        let currentValue = try await rpc.request("nvim_get_current_buf", params: [])
-        if let currentBuf = currentValue.intValue,
+        if let currentBuf = values["current"]?.intValue,
            let url = urlByBuffer[currentBuf] {
             workspace?.handleNvimBufferEnter(url: url, select: true)
         }
