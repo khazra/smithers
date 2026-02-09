@@ -185,7 +185,7 @@ private struct CommandPalettePanel: View {
                     HStack(spacing: 8) {
                         Image(systemName: command.icon)
                             .foregroundStyle(.secondary)
-                        Text(command.title)
+                        highlightedText(command.title, query: workspace.fileSearchQuery, accent: theme.accentColor)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
@@ -423,7 +423,9 @@ private struct CommandPalettePanel: View {
         let cleaned = trimmed.hasPrefix(">")
             ? String(trimmed.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
             : trimmed
-        guard !cleaned.isEmpty else { return Text(text) }
+        guard !cleaned.isEmpty else {
+            return Text(text).font(.system(size: Typography.base, weight: .regular))
+        }
         let lowerText = text.lowercased()
         let lowerQuery = cleaned.lowercased()
         var matches = Set<Int>()
@@ -451,7 +453,7 @@ private struct CommandPalettePanel: View {
                 result = result + Text(String(char))
             }
         }
-        return result
+        return result.font(.system(size: Typography.base, weight: .regular))
     }
 
     private func updatePreview(for entry: PaletteSelection?) {
