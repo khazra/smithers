@@ -73,6 +73,9 @@ final class NvimController {
     private var notificationsTask: Task<Void, Never>?
     private var isRunning = false
     private var isReady = false
+    private var uiAttached = false
+    private var gridMetricsObserver: UUID?
+    private var lastGridSize: (rows: Int, cols: Int)?
     private var bufferByURL: [URL: Int64] = [:]
     private var urlByBuffer: [Int64: URL] = [:]
     private var uiAttached = false
@@ -158,6 +161,79 @@ final class NvimController {
         isReady = false
         terminalView.shutdown()
         try? FileManager.default.removeItem(atPath: socketPath)
+    }
+
+    private func startGridMetricsObservation() {
+        guard gridMetricsObserver == nil else { return }
+        gridMetricsObserver = terminalView.addGridMetricsObserver { [weak self] metrics in
+            self?.handleGridMetricsChange(metrics)
+        }
+    }
+
+    private func stopGridMetricsObservation() {
+        guard let token = gridMetricsObserver else { return }
+        terminalView.removeGridMetricsObserver(token)
+        gridMetricsObserver = nil
+    }
+
+    private func handleGridMetricsChange(_ metrics: GhosttyGridMetrics) {
+        let size = (columns: metrics.columns, rows: metrics.rows)
+        if uiAttached {
+            if lastUiSize?.columns != size.columns || lastUiSize?.rows != size.rows {
+                lastUiSize = size
+                Task { [weak self] in
+                    guard let self else { return }
+                    _ = try? await self.rpc.request(
+                        "nvim_ui_try_resize",
+                        params: [.int(Int64(size.columns)), .int(Int64(size.rows))]
+                    )
+                }
+            }
+            return
+        }
+
+        Task { [weak self] in
+            try? await self?.attachUiIfNeeded()
+        }
+    }
+
+    private func attachUiIfNeeded() async throws {
+        guard !uiAttached else { return }
+        guard let metrics = terminalView.gridMetrics() else { return }
+        let options: [String: MsgPackValue] = [
+            "rgb": .bool(true),
+            "ext_multigrid": .bool(true),
+            "ext_linegrid": .bool(true),
+            "ext_hlstate": .bool(true),
+        ]
+        _ = try await rpc.request(
+            "nvim_ui_attach",
+            params: [
+                .int(Int64(metrics.columns)),
+                .int(Int64(metrics.rows)),
+                .map(options),
+            ]
+        )
+        uiAttached = true
+        lastUiSize = (columns: metrics.columns, rows: metrics.rows)
+    }
+
+    private func detachUiIfNeeded() {
+        guard uiAttached else { return }
+        uiAttached = false
+        lastUiSize = nil
+        Task { [weak self] in
+            guard let self else { return }
+            _ = try? await self.rpc.request("nvim_ui_detach", params: [])
+        }
+    }
+
+    private func clearFloatingWindowState() {
+        gridSizes.removeAll()
+        gridPositions = [1: GridPosition(row: 0, col: 0)]
+        floatingWindows.removeAll()
+        lastPublishedFloatingWindows = []
+        workspace?.setNvimFloatingWindows([])
     }
 
     func setGlobalVariables(_ variables: [String: MsgPackValue]) async {
@@ -667,6 +743,176 @@ final class NvimController {
         }
     }
 
+    private func handleRedraw(params: [MsgPackValue]) {
+        var needsFloatingUpdate = false
+
+        for event in params {
+            guard case let .array(values) = event else { continue }
+            guard let name = values.first?.stringValue else { continue }
+            let tuples = values.dropFirst()
+
+            switch name {
+            case "grid_resize":
+                for tuple in tuples {
+                    guard case let .array(items) = tuple, items.count >= 3 else { continue }
+                    guard let gridId = parseInt(items[0]),
+                          let width = parseInt(items[1]),
+                          let height = parseInt(items[2]) else { continue }
+                    let size = GridSize(width: Int(width), height: Int(height))
+                    gridSizes[gridId] = size
+                    if var state = floatingWindows[gridId] {
+                        state.size = size
+                        floatingWindows[gridId] = state
+                        needsFloatingUpdate = true
+                    }
+                }
+            case "grid_destroy":
+                for tuple in tuples {
+                    guard case let .array(items) = tuple, items.count >= 1 else { continue }
+                    guard let gridId = parseInt(items[0]) else { continue }
+                    gridSizes.removeValue(forKey: gridId)
+                    gridPositions.removeValue(forKey: gridId)
+                    if floatingWindows.removeValue(forKey: gridId) != nil {
+                        needsFloatingUpdate = true
+                    }
+                }
+            case "win_pos":
+                for tuple in tuples {
+                    guard case let .array(items) = tuple, items.count >= 4 else { continue }
+                    guard let gridId = parseInt(items[0]),
+                          let startRow = parseDouble(items[2]),
+                          let startCol = parseDouble(items[3]) else { continue }
+                    gridPositions[gridId] = GridPosition(row: startRow, col: startCol)
+                    needsFloatingUpdate = true
+                }
+            case "win_float_pos":
+                for tuple in tuples {
+                    guard case let .array(items) = tuple, items.count >= 8 else { continue }
+                    guard let gridId = parseInt(items[0]) else { continue }
+                    guard let anchorString = items[2].stringValue,
+                          let anchor = WindowAnchor(rawValue: anchorString) else { continue }
+                    let anchorGrid = parseInt(items[3]) ?? 1
+                    let anchorRow = parseDouble(items[4]) ?? 0
+                    let anchorCol = parseDouble(items[5]) ?? 0
+                    let zIndex = Int(parseInt(items[7]) ?? 0)
+
+                    var screenRow: Double?
+                    var screenCol: Double?
+                    if items.count >= 11,
+                       let row = parseDouble(items[9]),
+                       let col = parseDouble(items[10]),
+                       row >= 0, col >= 0 {
+                        screenRow = row
+                        screenCol = col
+                    }
+
+                    let anchorInfo = FloatingAnchorInfo(
+                        anchor: anchor,
+                        anchorGrid: anchorGrid,
+                        anchorRow: anchorRow,
+                        anchorCol: anchorCol,
+                        zIndex: zIndex,
+                        screenRow: screenRow,
+                        screenCol: screenCol
+                    )
+
+                    var state = floatingWindows[gridId] ?? FloatingWindowState(
+                        gridId: gridId,
+                        size: gridSizes[gridId],
+                        anchor: nil,
+                        position: nil,
+                        visible: true
+                    )
+                    state.anchor = anchorInfo
+                    state.visible = true
+                    if let size = gridSizes[gridId] {
+                        state.size = size
+                    }
+                    floatingWindows[gridId] = state
+                    needsFloatingUpdate = true
+                }
+            case "win_hide", "win_close":
+                for tuple in tuples {
+                    guard case let .array(items) = tuple, items.count >= 1 else { continue }
+                    guard let gridId = parseInt(items[0]) else { continue }
+                    gridPositions.removeValue(forKey: gridId)
+                    if floatingWindows.removeValue(forKey: gridId) != nil {
+                        needsFloatingUpdate = true
+                    }
+                }
+            case "flush":
+                if needsFloatingUpdate {
+                    publishFloatingWindowsIfNeeded()
+                    needsFloatingUpdate = false
+                }
+            default:
+                continue
+            }
+        }
+
+        if needsFloatingUpdate {
+            publishFloatingWindowsIfNeeded()
+        }
+    }
+
+    private func publishFloatingWindowsIfNeeded() {
+        var windows: [NvimFloatingWindow] = []
+        windows.reserveCapacity(floatingWindows.count)
+
+        for state in floatingWindows.values where state.visible {
+            guard let size = state.size,
+                  size.width > 0, size.height > 0,
+                  let anchor = state.anchor,
+                  let position = computeFloatingPosition(anchor: anchor, size: size) else {
+                continue
+            }
+            windows.append(NvimFloatingWindow(
+                id: state.gridId,
+                row: position.row,
+                col: position.col,
+                width: size.width,
+                height: size.height,
+                zIndex: anchor.zIndex
+            ))
+        }
+
+        windows.sort {
+            if $0.zIndex == $1.zIndex { return $0.id < $1.id }
+            return $0.zIndex < $1.zIndex
+        }
+
+        if windows != lastPublishedFloatingWindows {
+            lastPublishedFloatingWindows = windows
+            workspace?.setNvimFloatingWindows(windows)
+        }
+    }
+
+    private func computeFloatingPosition(anchor: FloatingAnchorInfo, size: GridSize) -> GridPosition? {
+        if let screenRow = anchor.screenRow, let screenCol = anchor.screenCol {
+            return GridPosition(row: max(0, screenRow), col: max(0, screenCol))
+        }
+
+        let base = gridPositions[anchor.anchorGrid] ?? GridPosition(row: 0, col: 0)
+        var row = base.row + anchor.anchorRow
+        var col = base.col + anchor.anchorCol
+
+        switch anchor.anchor {
+        case .northWest:
+            break
+        case .northEast:
+            col -= Double(size.width)
+        case .southWest:
+            row -= Double(size.height)
+        case .southEast:
+            row -= Double(size.height)
+            col -= Double(size.width)
+        }
+
+        if row < 0 { row = 0 }
+        if col < 0 { col = 0 }
+        return GridPosition(row: row, col: col)
+    }
+
     private func handleBufferEnter(buf: Int64?, name: String, select: Bool) {
         guard let buf else { return }
         guard let url = urlFromBufferName(name) else { return }
@@ -841,6 +1087,19 @@ final class NvimController {
             return Int64(doubleValue)
         }
         if let stringValue = value?.stringValue, let parsed = Int64(stringValue) {
+            return parsed
+        }
+        return nil
+    }
+
+    private func parseDouble(_ value: MsgPackValue?) -> Double? {
+        if let doubleValue = value?.doubleValue {
+            return doubleValue
+        }
+        if let intValue = value?.intValue {
+            return Double(intValue)
+        }
+        if let stringValue = value?.stringValue, let parsed = Double(stringValue) {
             return parsed
         }
         return nil
