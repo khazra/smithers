@@ -8,44 +8,57 @@
 
 /* Begin PBXBuildFile section */
 		0014938A815F4EEBDC1841C6 /* TerminalTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8E92E8F75CDE76BB1DEF23 /* TerminalTabView.swift */; };
+		003E93C5D58C87A1BB5078C7 /* ScrollbarOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D04A23F7693732BABFF94AFF /* ScrollbarOverlayView.swift */; };
 		06340EE4548969934A6BDDC4 /* CloseGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07AA73351D2E9B15D0D6667B /* CloseGuard.swift */; };
 		065D08F24951EE3B904B2EE1 /* NvimRPC.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6AC51F4F81DE3B6D41A9158 /* NvimRPC.swift */; };
+		0746C6569326B1824DF72382 /* KeyboardShortcutsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42173E9BC66FFC125C018D0 /* KeyboardShortcutsPanel.swift */; };
 		0C05E6AADE3512F5D270FAA9 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A587502DE9B721579B6AA7E8 /* ContentView.swift */; };
+		12AFFEFBBFED5968022B0927 /* EditorCursorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F52377E631A6DA5326E6773C /* EditorCursorView.swift */; };
 		1A2E8C8FC2EE8A371E638889 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30D457DAEFDA4AFD49D91FC1 /* AppTheme.swift */; };
 		1F9C9468FD1C7B7F9057E989 /* SearchPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41FB5C3BE4A91E9B5D8EC4C /* SearchPanelView.swift */; };
 		22BEE97BFB1F9A4C429B890C /* FileItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACDA054A9F51B9E7A05B82A6 /* FileItem.swift */; };
 		256BEABEF9D0E3ED51A8BDFD /* JSONRPCTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F35C80E0660E789DB10C42 /* JSONRPCTransport.swift */; };
+		2580765144D9171D7AF0CB37 /* WindowFrameStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5D1347D6E1E878718A00708 /* WindowFrameStore.swift */; };
 		2728B7D935DEEA0A779284D4 /* LinkifiedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3058C4909A162A396D9E98FF /* LinkifiedText.swift */; };
-		2749E06B1E41C146E6D27323 /* TreeSitterZig in Frameworks */ = {isa = PBXBuildFile; productRef = 60A0059EA0C9738353738CFF /* TreeSitterZig */; };
+		2749E06B1E41C146E6D27323 /* TreeSitterMarkdown in Frameworks */ = {isa = PBXBuildFile; productRef = 7BF7D938AA1BAD0114E556D5 /* TreeSitterMarkdown */; };
+		2A049B955D92893773AC60F0 /* KeyboardShortcutsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D95778A6AB4902483084FB /* KeyboardShortcutsModel.swift */; };
 		347D1A8C57AA9E0CD6678892 /* GhosttyTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8933CC7D6E370077FDBD3EFA /* GhosttyTerminalView.swift */; };
 		35AB982D94BA82ED0F30704C /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C0F3384268C43DE31057DAB0 /* GhosttyKit.xcframework */; };
-		38D291BFE946E7B338F68F04 /* TreeSitterJSON in Frameworks */ = {isa = PBXBuildFile; productRef = 66E22FD22A47D20C925DF1F2 /* TreeSitterJSON */; };
-		3A67BDCC050E01B5A1600FCA /* TreeSitterRust in Frameworks */ = {isa = PBXBuildFile; productRef = 1BD2AE0CC7EEB335F2D314E1 /* TreeSitterRust */; };
+		38D291BFE946E7B338F68F04 /* TreeSitterPython in Frameworks */ = {isa = PBXBuildFile; productRef = B78F739DAF624E44FEE7D498 /* TreeSitterPython */; };
+		3A67BDCC050E01B5A1600FCA /* TreeSitterZig in Frameworks */ = {isa = PBXBuildFile; productRef = 60A0059EA0C9738353738CFF /* TreeSitterZig */; };
 		42506BE8E2FFDF6DA22F5DF6 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A38D8B6B25D2C2C75BB72E7F /* ChatView.swift */; };
 		427411B9ECBC36148CC91061 /* GhosttyInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D40426E1854161EE406410C /* GhosttyInput.swift */; };
-		56E0C4F8A774687D95109231 /* STTextView in Frameworks */ = {isa = PBXBuildFile; productRef = BCCC2DB99045FD4E0BB74356 /* STTextView */; };
+		4E20E400F5DBE83CE1468845 /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B687D4B6172E2849FCFEDAB /* UpdateController.swift */; };
+		56E0C4F8A774687D95109231 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 71204D691AD05447486E8DBB /* Sparkle */; };
 		5ABB60B92EC6C1196FD011C8 /* WorkspaceStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B483B2FA9B2637CEF152C961 /* WorkspaceStateTests.swift */; };
 		6418F21ADED57B90EEA408B9 /* ChatHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81CE975B8840519D0F650B84 /* ChatHistoryStore.swift */; };
-		67F5438271AA5B872B678981 /* TreeSitterMarkdown in Frameworks */ = {isa = PBXBuildFile; productRef = 7BF7D938AA1BAD0114E556D5 /* TreeSitterMarkdown */; };
+		67F5438271AA5B872B678981 /* TreeSitterTypeScript in Frameworks */ = {isa = PBXBuildFile; productRef = 3EBAEA63D80D691E415FDC73 /* TreeSitterTypeScript */; };
+		6DE49632466D3BBBB18B646C /* ScrollbarHostingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE1016E91C789A3750BC6E5 /* ScrollbarHostingView.swift */; };
 		7535A26FF72E5C6AED50BC1F /* ThreadHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BCFBD3609ED856270F3D2A2 /* ThreadHistoryStore.swift */; };
 		78C668451B0FA87E17B52179 /* PreferencesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AD81D6BC1D5E240DD41E919 /* PreferencesModels.swift */; };
 		7A9DD80FB83AC7BB5F40265B /* CodexService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D82BDDA83CCB8DBEB56D54FD /* CodexService.swift */; };
-		827DA68E8C67210C3B80676D /* TreeSitterSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 57C3BB899D6CDDE86B893FB1 /* TreeSitterSwift */; };
+		827DA68E8C67210C3B80676D /* SwiftTreeSitter in Frameworks */ = {isa = PBXBuildFile; productRef = 47EC7FB4CB64AD3CB10A1094 /* SwiftTreeSitter */; };
+		9514F0C5573D23EE47BA2898 /* PerformanceOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 270AF056E88B2B5C82C072A2 /* PerformanceOverlayView.swift */; };
 		95E3F61267434DC0C9ADB1BA /* CommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A8E6F66E4C4CD4D5146948B /* CommandPaletteView.swift */; };
-		A76F12075AE0E86A6DFB2DB7 /* TreeSitterJavaScript in Frameworks */ = {isa = PBXBuildFile; productRef = B05DE54B2293CC4A5B0DE351 /* TreeSitterJavaScript */; };
+		A554910B342A2603F00B487E /* PerformanceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD6206E68B1E6E76AAE93C7 /* PerformanceMonitor.swift */; };
+		A76F12075AE0E86A6DFB2DB7 /* TreeSitterSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 57C3BB899D6CDDE86B893FB1 /* TreeSitterSwift */; };
 		A807A500E576401404E2845C /* PressAndHoldDisabler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4564D05283454D17C4A2130C /* PressAndHoldDisabler.swift */; };
-		A80D7D32ECFF2B4256B19725 /* TreeSitterGo in Frameworks */ = {isa = PBXBuildFile; productRef = 40AEBE982C5C31E4D58DB5E5 /* TreeSitterGo */; };
-		A93D9697EC606903E111E834 /* TreeSitterTypeScript in Frameworks */ = {isa = PBXBuildFile; productRef = 3EBAEA63D80D691E415FDC73 /* TreeSitterTypeScript */; };
-		AC66AB78EBF669C290386FCC /* TreeSitterBash in Frameworks */ = {isa = PBXBuildFile; productRef = 5A4841047D09D45F17C10EFE /* TreeSitterBash */; };
+		A80D7D32ECFF2B4256B19725 /* TreeSitterRust in Frameworks */ = {isa = PBXBuildFile; productRef = 1BD2AE0CC7EEB335F2D314E1 /* TreeSitterRust */; };
+		A93D9697EC606903E111E834 /* TreeSitterBash in Frameworks */ = {isa = PBXBuildFile; productRef = 5A4841047D09D45F17C10EFE /* TreeSitterBash */; };
+		AC66AB78EBF669C290386FCC /* TreeSitterJSON in Frameworks */ = {isa = PBXBuildFile; productRef = 66E22FD22A47D20C925DF1F2 /* TreeSitterJSON */; };
+		B974781FDDC06DD695E8E97A /* TreeSitterGo in Frameworks */ = {isa = PBXBuildFile; productRef = 40AEBE982C5C31E4D58DB5E5 /* TreeSitterGo */; };
 		C66EA0974D863D458B0A171C /* GhosttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4132A0BEE89C42A7FB1DC59 /* GhosttyApp.swift */; };
-		CB32654F5BB16CEBF30B91F5 /* SwiftTreeSitter in Frameworks */ = {isa = PBXBuildFile; productRef = 47EC7FB4CB64AD3CB10A1094 /* SwiftTreeSitter */; };
+		CB32654F5BB16CEBF30B91F5 /* STTextView in Frameworks */ = {isa = PBXBuildFile; productRef = BCCC2DB99045FD4E0BB74356 /* STTextView */; };
 		CD146869D7D4DD80FFEE3187 /* SyntaxHighlighting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F334689F6A985085943312B6 /* SyntaxHighlighting.swift */; };
+		CF4AB13DF1C552235C42554C /* TabBarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84C2D74BEE9183303FD42BD /* TabBarItem.swift */; };
 		D368B89C3C6D1E043269717D /* SmithersUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96D3FD80488838D7B4EA877A /* SmithersUITests.swift */; };
 		D6D345869F56D936D4DAC6C7 /* FileItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45514CF0D8DAE09DCD5BAD3F /* FileItemTests.swift */; };
 		D847AE7F6B476F8419133C57 /* FileTreeSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B9E16E717471B60BCA71C6C /* FileTreeSidebar.swift */; };
+		DD7D5E34C18E05F3167A59BA /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3BD54695F2BC475D7C4981E /* Typography.swift */; };
 		E0AB0E5FF1667F065428B456 /* NvimController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19942FCCF8B2D42A46DD182E /* NvimController.swift */; };
-		E0B5AA2644ACEB3F09564D8D /* TreeSitterPython in Frameworks */ = {isa = PBXBuildFile; productRef = B78F739DAF624E44FEE7D498 /* TreeSitterPython */; };
+		E0B5AA2644ACEB3F09564D8D /* TreeSitterJavaScript in Frameworks */ = {isa = PBXBuildFile; productRef = B05DE54B2293CC4A5B0DE351 /* TreeSitterJavaScript */; };
 		E6DE57D1991DDFDA11E56E27 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E3D84544EAEC72C20ACBBF32 /* Carbon.framework */; };
+		E7ED9069A3F10941790EDDEA /* NvimViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D401C549042E7BC3F220ECE /* NvimViewport.swift */; };
 		E961693CD21DFE7F4E5350E1 /* WorkspaceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E71D95313FFB398DA0EB4A5 /* WorkspaceState.swift */; };
 		EBD5AF0A2D7E3CDC0F10DB6D /* TmuxKeyHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E4708D9C09F3165A80FF50 /* TmuxKeyHandler.swift */; };
 		ECF16677A59FB88A7F227A6F /* DiffViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9572518B7D0E5B512928D696 /* DiffViewer.swift */; };
@@ -76,14 +89,18 @@
 		0D40426E1854161EE406410C /* GhosttyInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInput.swift; sourceTree = "<group>"; };
 		19942FCCF8B2D42A46DD182E /* NvimController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NvimController.swift; sourceTree = "<group>"; };
 		1AA05DE23BF0482E7C8747F8 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
+		1FE1016E91C789A3750BC6E5 /* ScrollbarHostingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollbarHostingView.swift; sourceTree = "<group>"; };
+		270AF056E88B2B5C82C072A2 /* PerformanceOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceOverlayView.swift; sourceTree = "<group>"; };
 		28E4708D9C09F3165A80FF50 /* TmuxKeyHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxKeyHandler.swift; sourceTree = "<group>"; };
 		2BCFBD3609ED856270F3D2A2 /* ThreadHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadHistoryStore.swift; sourceTree = "<group>"; };
+		2D401C549042E7BC3F220ECE /* NvimViewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NvimViewport.swift; sourceTree = "<group>"; };
 		3058C4909A162A396D9E98FF /* LinkifiedText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkifiedText.swift; sourceTree = "<group>"; };
 		30D457DAEFDA4AFD49D91FC1 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		3D8E92E8F75CDE76BB1DEF23 /* TerminalTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabView.swift; sourceTree = "<group>"; };
 		45514CF0D8DAE09DCD5BAD3F /* FileItemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileItemTests.swift; sourceTree = "<group>"; };
 		4564D05283454D17C4A2130C /* PressAndHoldDisabler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressAndHoldDisabler.swift; sourceTree = "<group>"; };
 		48F35C80E0660E789DB10C42 /* JSONRPCTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONRPCTransport.swift; sourceTree = "<group>"; };
+		4B687D4B6172E2849FCFEDAB /* UpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateController.swift; sourceTree = "<group>"; };
 		4B9E16E717471B60BCA71C6C /* FileTreeSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeSidebar.swift; sourceTree = "<group>"; };
 		591F1587F588E50EA4BECE81 /* SmithersTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmithersTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7697BC04474DE2DF6A25E1A2 /* Smithers.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Smithers.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -94,6 +111,8 @@
 		9572518B7D0E5B512928D696 /* DiffViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffViewer.swift; sourceTree = "<group>"; };
 		96D3FD80488838D7B4EA877A /* SmithersUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmithersUITests.swift; sourceTree = "<group>"; };
 		A38D8B6B25D2C2C75BB72E7F /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		A3BD54695F2BC475D7C4981E /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
+		A3D95778A6AB4902483084FB /* KeyboardShortcutsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutsModel.swift; sourceTree = "<group>"; };
 		A587502DE9B721579B6AA7E8 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AB403FF3EE585DFE8FB62A66 /* SmithersUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmithersUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		ACDA054A9F51B9E7A05B82A6 /* FileItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileItem.swift; sourceTree = "<group>"; };
@@ -102,10 +121,16 @@
 		C0F3384268C43DE31057DAB0 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = GhosttyKit.xcframework; path = ../../ghostty/macos/GhosttyKit.xcframework; sourceTree = "<group>"; };
 		C4132A0BEE89C42A7FB1DC59 /* GhosttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyApp.swift; sourceTree = "<group>"; };
 		C6AC51F4F81DE3B6D41A9158 /* NvimRPC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NvimRPC.swift; sourceTree = "<group>"; };
+		D04A23F7693732BABFF94AFF /* ScrollbarOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollbarOverlayView.swift; sourceTree = "<group>"; };
 		D41FB5C3BE4A91E9B5D8EC4C /* SearchPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchPanelView.swift; sourceTree = "<group>"; };
+		D42173E9BC66FFC125C018D0 /* KeyboardShortcutsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutsPanel.swift; sourceTree = "<group>"; };
 		D82BDDA83CCB8DBEB56D54FD /* CodexService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexService.swift; sourceTree = "<group>"; };
 		E3D84544EAEC72C20ACBBF32 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = Carbon.framework; sourceTree = "<group>"; };
+		EAD6206E68B1E6E76AAE93C7 /* PerformanceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMonitor.swift; sourceTree = "<group>"; };
 		F334689F6A985085943312B6 /* SyntaxHighlighting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxHighlighting.swift; sourceTree = "<group>"; };
+		F52377E631A6DA5326E6773C /* EditorCursorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorCursorView.swift; sourceTree = "<group>"; };
+		F5D1347D6E1E878718A00708 /* WindowFrameStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowFrameStore.swift; sourceTree = "<group>"; };
+		F84C2D74BEE9183303FD42BD /* TabBarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarItem.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -113,18 +138,19 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				56E0C4F8A774687D95109231 /* STTextView in Frameworks */,
-				CB32654F5BB16CEBF30B91F5 /* SwiftTreeSitter in Frameworks */,
-				827DA68E8C67210C3B80676D /* TreeSitterSwift in Frameworks */,
-				A76F12075AE0E86A6DFB2DB7 /* TreeSitterJavaScript in Frameworks */,
-				E0B5AA2644ACEB3F09564D8D /* TreeSitterPython in Frameworks */,
-				38D291BFE946E7B338F68F04 /* TreeSitterJSON in Frameworks */,
-				AC66AB78EBF669C290386FCC /* TreeSitterBash in Frameworks */,
-				A93D9697EC606903E111E834 /* TreeSitterTypeScript in Frameworks */,
-				67F5438271AA5B872B678981 /* TreeSitterMarkdown in Frameworks */,
-				2749E06B1E41C146E6D27323 /* TreeSitterZig in Frameworks */,
-				3A67BDCC050E01B5A1600FCA /* TreeSitterRust in Frameworks */,
-				A80D7D32ECFF2B4256B19725 /* TreeSitterGo in Frameworks */,
+				56E0C4F8A774687D95109231 /* Sparkle in Frameworks */,
+				CB32654F5BB16CEBF30B91F5 /* STTextView in Frameworks */,
+				827DA68E8C67210C3B80676D /* SwiftTreeSitter in Frameworks */,
+				A76F12075AE0E86A6DFB2DB7 /* TreeSitterSwift in Frameworks */,
+				E0B5AA2644ACEB3F09564D8D /* TreeSitterJavaScript in Frameworks */,
+				38D291BFE946E7B338F68F04 /* TreeSitterPython in Frameworks */,
+				AC66AB78EBF669C290386FCC /* TreeSitterJSON in Frameworks */,
+				A93D9697EC606903E111E834 /* TreeSitterBash in Frameworks */,
+				67F5438271AA5B872B678981 /* TreeSitterTypeScript in Frameworks */,
+				2749E06B1E41C146E6D27323 /* TreeSitterMarkdown in Frameworks */,
+				3A67BDCC050E01B5A1600FCA /* TreeSitterZig in Frameworks */,
+				A80D7D32ECFF2B4256B19725 /* TreeSitterRust in Frameworks */,
+				B974781FDDC06DD695E8E97A /* TreeSitterGo in Frameworks */,
 				E6DE57D1991DDFDA11E56E27 /* Carbon.framework in Frameworks */,
 				35AB982D94BA82ED0F30704C /* GhosttyKit.xcframework in Frameworks */,
 			);
@@ -144,24 +170,36 @@
 				0A8E6F66E4C4CD4D5146948B /* CommandPaletteView.swift */,
 				A587502DE9B721579B6AA7E8 /* ContentView.swift */,
 				9572518B7D0E5B512928D696 /* DiffViewer.swift */,
+				F52377E631A6DA5326E6773C /* EditorCursorView.swift */,
 				ACDA054A9F51B9E7A05B82A6 /* FileItem.swift */,
 				4B9E16E717471B60BCA71C6C /* FileTreeSidebar.swift */,
 				C4132A0BEE89C42A7FB1DC59 /* GhosttyApp.swift */,
 				0D40426E1854161EE406410C /* GhosttyInput.swift */,
 				8933CC7D6E370077FDBD3EFA /* GhosttyTerminalView.swift */,
 				48F35C80E0660E789DB10C42 /* JSONRPCTransport.swift */,
+				A3D95778A6AB4902483084FB /* KeyboardShortcutsModel.swift */,
+				D42173E9BC66FFC125C018D0 /* KeyboardShortcutsPanel.swift */,
 				3058C4909A162A396D9E98FF /* LinkifiedText.swift */,
 				19942FCCF8B2D42A46DD182E /* NvimController.swift */,
 				C6AC51F4F81DE3B6D41A9158 /* NvimRPC.swift */,
+				2D401C549042E7BC3F220ECE /* NvimViewport.swift */,
+				EAD6206E68B1E6E76AAE93C7 /* PerformanceMonitor.swift */,
+				270AF056E88B2B5C82C072A2 /* PerformanceOverlayView.swift */,
 				8AD81D6BC1D5E240DD41E919 /* PreferencesModels.swift */,
 				1AA05DE23BF0482E7C8747F8 /* PreferencesView.swift */,
 				4564D05283454D17C4A2130C /* PressAndHoldDisabler.swift */,
+				1FE1016E91C789A3750BC6E5 /* ScrollbarHostingView.swift */,
+				D04A23F7693732BABFF94AFF /* ScrollbarOverlayView.swift */,
 				D41FB5C3BE4A91E9B5D8EC4C /* SearchPanelView.swift */,
 				BB1A5DC923E5D8AE13DED3C7 /* SmithersApp.swift */,
 				F334689F6A985085943312B6 /* SyntaxHighlighting.swift */,
+				F84C2D74BEE9183303FD42BD /* TabBarItem.swift */,
 				3D8E92E8F75CDE76BB1DEF23 /* TerminalTabView.swift */,
 				2BCFBD3609ED856270F3D2A2 /* ThreadHistoryStore.swift */,
 				28E4708D9C09F3165A80FF50 /* TmuxKeyHandler.swift */,
+				A3BD54695F2BC475D7C4981E /* Typography.swift */,
+				4B687D4B6172E2849FCFEDAB /* UpdateController.swift */,
+				F5D1347D6E1E878718A00708 /* WindowFrameStore.swift */,
 				7E71D95313FFB398DA0EB4A5 /* WorkspaceState.swift */,
 			);
 			path = Smithers;
@@ -248,6 +286,7 @@
 			);
 			name = Smithers;
 			packageProductDependencies = (
+				71204D691AD05447486E8DBB /* Sparkle */,
 				BCCC2DB99045FD4E0BB74356 /* STTextView */,
 				47EC7FB4CB64AD3CB10A1094 /* SwiftTreeSitter */,
 				57C3BB899D6CDDE86B893FB1 /* TreeSitterSwift */,
@@ -316,6 +355,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				746D7CAE52A949710750A85C /* XCRemoteSwiftPackageReference "STTextView" */,
+				BC93B38AAC92CCBD3ACD98B4 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				F2DD7F6C4CA739C2CCC57624 /* XCRemoteSwiftPackageReference "swift-tree-sitter" */,
 				9554221B835580EB150C2A47 /* XCRemoteSwiftPackageReference "tree-sitter-bash" */,
 				701B4AF8DBE21004EBBE37BE /* XCRemoteSwiftPackageReference "tree-sitter-go" */,
@@ -360,24 +400,36 @@
 				95E3F61267434DC0C9ADB1BA /* CommandPaletteView.swift in Sources */,
 				0C05E6AADE3512F5D270FAA9 /* ContentView.swift in Sources */,
 				ECF16677A59FB88A7F227A6F /* DiffViewer.swift in Sources */,
+				12AFFEFBBFED5968022B0927 /* EditorCursorView.swift in Sources */,
 				22BEE97BFB1F9A4C429B890C /* FileItem.swift in Sources */,
 				D847AE7F6B476F8419133C57 /* FileTreeSidebar.swift in Sources */,
 				C66EA0974D863D458B0A171C /* GhosttyApp.swift in Sources */,
 				427411B9ECBC36148CC91061 /* GhosttyInput.swift in Sources */,
 				347D1A8C57AA9E0CD6678892 /* GhosttyTerminalView.swift in Sources */,
 				256BEABEF9D0E3ED51A8BDFD /* JSONRPCTransport.swift in Sources */,
+				2A049B955D92893773AC60F0 /* KeyboardShortcutsModel.swift in Sources */,
+				0746C6569326B1824DF72382 /* KeyboardShortcutsPanel.swift in Sources */,
 				2728B7D935DEEA0A779284D4 /* LinkifiedText.swift in Sources */,
 				E0AB0E5FF1667F065428B456 /* NvimController.swift in Sources */,
 				065D08F24951EE3B904B2EE1 /* NvimRPC.swift in Sources */,
+				E7ED9069A3F10941790EDDEA /* NvimViewport.swift in Sources */,
+				A554910B342A2603F00B487E /* PerformanceMonitor.swift in Sources */,
+				9514F0C5573D23EE47BA2898 /* PerformanceOverlayView.swift in Sources */,
 				78C668451B0FA87E17B52179 /* PreferencesModels.swift in Sources */,
 				FFEBAC1126E726293A497CB0 /* PreferencesView.swift in Sources */,
 				A807A500E576401404E2845C /* PressAndHoldDisabler.swift in Sources */,
+				6DE49632466D3BBBB18B646C /* ScrollbarHostingView.swift in Sources */,
+				003E93C5D58C87A1BB5078C7 /* ScrollbarOverlayView.swift in Sources */,
 				1F9C9468FD1C7B7F9057E989 /* SearchPanelView.swift in Sources */,
 				EE4DDAC29B154BBC0A2B7A80 /* SmithersApp.swift in Sources */,
 				CD146869D7D4DD80FFEE3187 /* SyntaxHighlighting.swift in Sources */,
+				CF4AB13DF1C552235C42554C /* TabBarItem.swift in Sources */,
 				0014938A815F4EEBDC1841C6 /* TerminalTabView.swift in Sources */,
 				7535A26FF72E5C6AED50BC1F /* ThreadHistoryStore.swift in Sources */,
 				EBD5AF0A2D7E3CDC0F10DB6D /* TmuxKeyHandler.swift in Sources */,
+				DD7D5E34C18E05F3167A59BA /* Typography.swift in Sources */,
+				4E20E400F5DBE83CE1468845 /* UpdateController.swift in Sources */,
+				2580765144D9171D7AF0CB37 /* WindowFrameStore.swift in Sources */,
 				E961693CD21DFE7F4E5350E1 /* WorkspaceState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -421,6 +473,9 @@
 					"\"../../ghostty/macos\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_SUFeedURL = "$(SPARKLE_FEED_URL)";
+				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_KEY)";
+				INFOPLIST_KEY_SUSnapshotFeedURL = "$(SPARKLE_SNAPSHOT_FEED_URL)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -431,6 +486,9 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.smithers.desktop;
 				SDKROOT = macosx;
+				SPARKLE_FEED_URL = "";
+				SPARKLE_PUBLIC_KEY = "";
+				SPARKLE_SNAPSHOT_FEED_URL = "";
 				SWIFT_VERSION = 5.10;
 			};
 			name = Debug;
@@ -506,6 +564,9 @@
 					"\"../../ghostty/macos\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_SUFeedURL = "$(SPARKLE_FEED_URL)";
+				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_KEY)";
+				INFOPLIST_KEY_SUSnapshotFeedURL = "$(SPARKLE_SNAPSHOT_FEED_URL)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -516,6 +577,9 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.smithers.desktop;
 				SDKROOT = macosx;
+				SPARKLE_FEED_URL = "";
+				SPARKLE_PUBLIC_KEY = "";
+				SPARKLE_SNAPSHOT_FEED_URL = "";
 				SWIFT_VERSION = 5.10;
 			};
 			name = Release;
@@ -780,6 +844,14 @@
 				version = 0.23.1;
 			};
 		};
+		BC93B38AAC92CCBD3ACD98B4 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
 		C215E2B3FF55BCFCD8CA6572 /* XCRemoteSwiftPackageReference "tree-sitter-python" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tree-sitter/tree-sitter-python.git";
@@ -838,6 +910,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B33BBB86702D1AA314BC16C3 /* XCRemoteSwiftPackageReference "tree-sitter-json" */;
 			productName = TreeSitterJSON;
+		};
+		71204D691AD05447486E8DBB /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BC93B38AAC92CCBD3ACD98B4 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 		7BF7D938AA1BAD0114E556D5 /* TreeSitterMarkdown */ = {
 			isa = XCSwiftPackageProductDependency;

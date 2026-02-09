@@ -8,6 +8,7 @@ let package = Package(
         .executable(name: "Smithers", targets: ["Smithers"]),
     ],
     dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.0.0"),
         .package(url: "https://github.com/krzyzanowskim/STTextView.git", from: "0.9.0"),
         .package(url: "https://github.com/tree-sitter/swift-tree-sitter.git", from: "0.9.0"),
         .package(url: "https://github.com/alex-pinkus/tree-sitter-swift.git", branch: "with-generated-files"),
@@ -30,6 +31,7 @@ let package = Package(
             name: "Smithers",
             dependencies: [
                 "GhosttyKit",
+                .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "STTextView", package: "STTextView"),
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
                 .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),

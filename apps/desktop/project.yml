@@ -6,6 +6,9 @@ options:
   xcodeVersion: "15.0"
 
 packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle.git
+    from: "2.0.0"
   STTextView:
     url: https://github.com/krzyzanowskim/STTextView.git
     from: "0.9.0"
@@ -50,6 +53,8 @@ targets:
     sources:
       - Smithers
     dependencies:
+      - package: Sparkle
+        product: Sparkle
       - package: STTextView
         product: STTextView
       - package: swift-tree-sitter
@@ -81,12 +86,19 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.smithers.desktop
-        GENERATE_INFOPLIST_FILE: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Smithers/Info.plist
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.10"
         CODE_SIGN_STYLE: Automatic
         DEFINES_MODULE: YES
+        SPARKLE_FEED_URL: ""
+        SPARKLE_SNAPSHOT_FEED_URL: ""
+        SPARKLE_PUBLIC_KEY: ""
+        INFOPLIST_KEY_SUFeedURL: $(SPARKLE_FEED_URL)
+        INFOPLIST_KEY_SUSnapshotFeedURL: $(SPARKLE_SNAPSHOT_FEED_URL)
+        INFOPLIST_KEY_SUPublicEDKey: $(SPARKLE_PUBLIC_KEY)
         OTHER_LDFLAGS: ["-lstdc++"]
 
   SmithersTests:
