@@ -47,6 +47,18 @@
             </array>
         </dict>
     </array>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.smithers.desktop</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>smithers</string>
+                <string>smithers-open-file</string>
+            </array>
+        </dict>
+    </array>
     <key>UTImportedTypeDeclarations</key>
     <array>
         <dict>
