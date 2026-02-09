@@ -10,6 +10,7 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
 
     var onClose: (() -> Void)?
     private(set) var command: String?
+    var optionAsMeta: OptionAsMeta = .both
 
     var surface: ghostty_surface_t?
 
@@ -22,11 +23,12 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
 
     override var acceptsFirstResponder: Bool { true }
 
-    init(app: GhosttyApp, workingDirectory: String?, command: String? = nil) {
+    init(app: GhosttyApp, workingDirectory: String?, command: String? = nil, optionAsMeta: OptionAsMeta = .both) {
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         wantsLayer = true
 
         self.command = command
+        self.optionAsMeta = optionAsMeta
         guard let appHandle = app.app else { return }
         surface = createSurface(app: appHandle, workingDirectory: workingDirectory, command: command)
         updateSurfaceSize(for: frame.size)
@@ -256,6 +258,9 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
                 translationMods.remove(flag)
             }
         }
+        if shouldTreatOptionAsMeta(event) {
+            translationMods.remove(.option)
+        }
 
         let translationEvent: NSEvent
         if translationMods == event.modifierFlags {
@@ -280,13 +285,21 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
         keyTextAccumulator = []
         defer { keyTextAccumulator = nil }
 
+        let effectiveMods = effectiveModifierFlags(for: event)
         let hadMarked = markedTextStorage.length > 0
         interpretKeyEvents([translationEvent])
         syncPreedit(clearIfNeeded: hadMarked)
 
         if let list = keyTextAccumulator, !list.isEmpty {
             for text in list {
-                _ = keyAction(action, event: event, translationEvent: translationEvent, text: text, composing: false)
+                _ = keyAction(
+                    action,
+                    event: event,
+                    translationEvent: translationEvent,
+                    text: text,
+                    composing: false,
+                    modifierFlagsOverride: effectiveMods
+                )
             }
         } else {
             let composing = markedTextStorage.length > 0 || hadMarked
@@ -295,13 +308,15 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
                 event: event,
                 translationEvent: translationEvent,
                 text: translationEvent.ghosttyCharacters,
-                composing: composing
+                composing: composing,
+                modifierFlagsOverride: effectiveMods
             )
         }
     }
 
     override func keyUp(with event: NSEvent) {
-        _ = keyAction(GHOSTTY_ACTION_RELEASE, event: event)
+        let effectiveMods = effectiveModifierFlags(for: event)
+        _ = keyAction(GHOSTTY_ACTION_RELEASE, event: event, modifierFlagsOverride: effectiveMods)
     }
 
     override func flagsChanged(with event: NSEvent) {
@@ -310,7 +325,12 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
         case 0x39: mod = GHOSTTY_MODS_CAPS.rawValue
         case 0x38, 0x3C: mod = GHOSTTY_MODS_SHIFT.rawValue
         case 0x3B, 0x3E: mod = GHOSTTY_MODS_CTRL.rawValue
-        case 0x3A, 0x3D: mod = GHOSTTY_MODS_ALT.rawValue
+        case 0x3A:
+            guard optionAsMeta.allowsLeft else { return }
+            mod = GHOSTTY_MODS_ALT.rawValue
+        case 0x3D:
+            guard optionAsMeta.allowsRight else { return }
+            mod = GHOSTTY_MODS_ALT.rawValue
         case 0x37, 0x36: mod = GHOSTTY_MODS_SUPER.rawValue
         default:
             return
@@ -324,11 +344,37 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
             action = GHOSTTY_ACTION_PRESS
         }
 
-        _ = keyAction(action, event: event)
+        let effectiveMods = effectiveModifierFlags(for: event)
+        _ = keyAction(action, event: event, modifierFlagsOverride: effectiveMods)
     }
 
     override func doCommand(by selector: Selector) {
         // Prevents NSBeep for unhandled selectors.
+    }
+
+    private func optionSideFlags(from flags: NSEvent.ModifierFlags) -> (left: Bool, right: Bool) {
+        let left = flags.contains(.leftOption)
+        let right = flags.contains(.rightOption)
+        return (left: left, right: right)
+    }
+
+    private func shouldTreatOptionAsMeta(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.option) else { return false }
+        let sides = optionSideFlags(from: event.modifierFlags)
+        if sides.left || sides.right {
+            if sides.left && optionAsMeta.allowsLeft { return true }
+            if sides.right && optionAsMeta.allowsRight { return true }
+            return false
+        }
+        return optionAsMeta == .both
+    }
+
+    private func effectiveModifierFlags(for event: NSEvent) -> NSEvent.ModifierFlags {
+        var flags = event.modifierFlags
+        if flags.contains(.option), !shouldTreatOptionAsMeta(event) {
+            flags.remove(.option)
+        }
+        return flags
     }
 
     // MARK: - NSTextInputClient
@@ -515,10 +561,15 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
         event: NSEvent,
         translationEvent: NSEvent? = nil,
         text: String? = nil,
-        composing: Bool = false
+        composing: Bool = false,
+        modifierFlagsOverride: NSEvent.ModifierFlags? = nil
     ) -> Bool {
         guard let surface else { return false }
-        var keyEvent = event.ghosttyKeyEvent(action, translationMods: translationEvent?.modifierFlags)
+        var keyEvent = event.ghosttyKeyEvent(
+            action,
+            translationMods: translationEvent?.modifierFlags,
+            modifierFlagsOverride: modifierFlagsOverride
+        )
         keyEvent.composing = composing
 
         if let text, text.count > 0,

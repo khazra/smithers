@@ -38,7 +38,8 @@ extension NSEvent {
     /// with the information or lifetimes given.
     func ghosttyKeyEvent(
         _ action: ghostty_input_action_e,
-        translationMods: NSEvent.ModifierFlags? = nil
+        translationMods: NSEvent.ModifierFlags? = nil,
+        modifierFlagsOverride: NSEvent.ModifierFlags? = nil
     ) -> ghostty_input_key_s {
         var keyEvent = ghostty_input_key_s()
         keyEvent.action = action
@@ -46,9 +47,10 @@ extension NSEvent {
         keyEvent.text = nil
         keyEvent.composing = false
 
-        keyEvent.mods = GhosttyInput.ghosttyMods(modifierFlags)
+        let eventFlags = modifierFlagsOverride ?? modifierFlags
+        keyEvent.mods = GhosttyInput.ghosttyMods(eventFlags)
         keyEvent.consumed_mods = GhosttyInput.ghosttyMods(
-            (translationMods ?? modifierFlags)
+            (translationMods ?? eventFlags)
                 .subtracting([.control, .command])
         )
 

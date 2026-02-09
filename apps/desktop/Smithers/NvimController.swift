@@ -14,6 +14,7 @@ final class NvimController {
         case connectTimeout
         case invalidResponse
         case missingNvim
+        case invalidNvimPath(String)
 
         var errorDescription: String? {
             switch self {
@@ -23,6 +24,8 @@ final class NvimController {
                 return "Invalid response from Neovim"
             case .missingNvim:
                 return "Neovim (nvim) not found on PATH."
+            case .invalidNvimPath(let path):
+                return "Neovim not executable at path: \(path)"
             }
         }
     }
@@ -55,7 +58,13 @@ final class NvimController {
         "CursorLineNr",
     ]
 
-    init(workspace: WorkspaceState, ghosttyApp: GhosttyApp, workingDirectory: String, nvimPath: String) {
+    init(
+        workspace: WorkspaceState,
+        ghosttyApp: GhosttyApp,
+        workingDirectory: String,
+        nvimPath: String,
+        optionAsMeta: OptionAsMeta
+    ) {
         self.workspace = workspace
         let socketURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("smithers-nvim-\(UUID().uuidString).sock")
@@ -64,7 +73,8 @@ final class NvimController {
         terminalView = GhosttyTerminalView(
             app: ghosttyApp,
             workingDirectory: workingDirectory,
-            command: command
+            command: command,
+            optionAsMeta: optionAsMeta
         )
     }
 
