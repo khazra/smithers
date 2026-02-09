@@ -261,7 +261,7 @@ private struct CommandPalettePanel: View {
                         }
                     }
                     if !recentFiles.isEmpty {
-                        Section("Recent Files") {
+                        Section("Recent Views") {
                             ForEach(recentFiles) { entry in
                                 let selection = PaletteSelection.file(entry.url)
                                 let isSelected = selection == selectedEntry
