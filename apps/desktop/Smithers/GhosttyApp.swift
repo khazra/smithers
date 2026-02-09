@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import QuartzCore
 
 final class GhosttyApp {
     static let shared = GhosttyApp()
@@ -159,7 +160,9 @@ final class GhosttyApp {
 
             case GHOSTTY_ACTION_RENDER:
                 DispatchQueue.main.async {
+                    let start = CACurrentMediaTime()
                     ghostty_surface_draw(surface)
+                    PerformanceMonitor.shared.recordRender(duration: CACurrentMediaTime() - start)
                 }
                 return true
 
