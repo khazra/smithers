@@ -22,10 +22,18 @@ enum GhosttyInput {
 
         // Handle sided input (best effort)
         let rawFlags = flags.rawValue
-        if (rawFlags & UInt(NX_DEVICERSHIFTKEYMASK) != 0) { mods |= GHOSTTY_MODS_SHIFT_RIGHT.rawValue }
-        if (rawFlags & UInt(NX_DEVICERCTLKEYMASK) != 0) { mods |= GHOSTTY_MODS_CTRL_RIGHT.rawValue }
-        if (rawFlags & UInt(NX_DEVICERALTKEYMASK) != 0) { mods |= GHOSTTY_MODS_ALT_RIGHT.rawValue }
-        if (rawFlags & UInt(NX_DEVICERCMDKEYMASK) != 0) { mods |= GHOSTTY_MODS_SUPER_RIGHT.rawValue }
+        if (flags.contains(.shift)) && (rawFlags & UInt(NX_DEVICERSHIFTKEYMASK) != 0) {
+            mods |= GHOSTTY_MODS_SHIFT_RIGHT.rawValue
+        }
+        if (flags.contains(.control)) && (rawFlags & UInt(NX_DEVICERCTLKEYMASK) != 0) {
+            mods |= GHOSTTY_MODS_CTRL_RIGHT.rawValue
+        }
+        if (flags.contains(.option)) && (rawFlags & UInt(NX_DEVICERALTKEYMASK) != 0) {
+            mods |= GHOSTTY_MODS_ALT_RIGHT.rawValue
+        }
+        if (flags.contains(.command)) && (rawFlags & UInt(NX_DEVICERCMDKEYMASK) != 0) {
+            mods |= GHOSTTY_MODS_SUPER_RIGHT.rawValue
+        }
 
         return ghostty_input_mods_e(mods)
     }

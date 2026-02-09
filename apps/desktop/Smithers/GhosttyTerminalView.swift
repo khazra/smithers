@@ -2,10 +2,22 @@ import AppKit
 import QuartzCore
 import GhosttyKit
 
+struct GhosttyGridMetrics: Equatable {
+    let columns: Int
+    let rows: Int
+    let cellSize: CGSize
+    let origin: CGPoint
+}
+
 final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     @Published var title: String = "Terminal"
     @Published var pwd: String?
-    @Published var cellSize: NSSize = .zero
+    @Published var cellSize: NSSize = .zero {
+        didSet {
+            notifyGridMetricsChange()
+            smoothScrollController?.updateCellSize(cellSize)
+        }
+    }
     @Published var isHealthy: Bool = true
 
     var onClose: (() -> Void)?
@@ -21,6 +33,12 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     private var currentCursor: NSCursor = .iBeam
     private var lastContentSize: NSSize?
     private var windowObservers: [NSObjectProtocol] = []
+    private var gridMetricsObservers: [UUID: (GhosttyGridMetrics) -> Void] = [:]
+    private var lastRepeatTimestamp: TimeInterval = 0
+
+    private lazy var frameScheduler = GhosttyFrameScheduler(drawHandler: { [weak self] in
+        self?.drawFrame()
+    })
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -43,6 +61,7 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     deinit {
         windowObservers.forEach { NotificationCenter.default.removeObserver($0) }
         windowObservers.removeAll()
+        frameScheduler.setVisible(false)
         if let surface {
             DispatchQueue.main.async {
                 ghostty_surface_free(surface)
@@ -55,6 +74,7 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
             ghostty_surface_free(surface)
             self.surface = nil
         }
+        frameScheduler.setVisible(false)
     }
 
     static func from(surface: ghostty_surface_t) -> GhosttyTerminalView? {
@@ -78,6 +98,39 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: currentCursor)
+    }
+
+    func addGridMetricsObserver(_ handler: @escaping (GhosttyGridMetrics) -> Void) -> UUID {
+        let token = UUID()
+        gridMetricsObservers[token] = handler
+        if let metrics = gridMetrics() {
+            handler(metrics)
+        }
+        return token
+    }
+
+    func removeGridMetricsObserver(_ token: UUID) {
+        gridMetricsObservers.removeValue(forKey: token)
+    }
+
+    func gridMetrics() -> GhosttyGridMetrics? {
+        guard let surface else { return nil }
+        let size = ghostty_surface_size(surface)
+        let columns = Int(size.columns)
+        let rows = Int(size.rows)
+        guard columns > 0, rows > 0 else { return nil }
+
+        let backingCell = NSSize(width: Double(size.cell_width_px), height: Double(size.cell_height_px))
+        let cell = convertFromBacking(backingCell)
+        guard cell.width > 0, cell.height > 0 else { return nil }
+
+        let gridWidth = CGFloat(columns) * cell.width
+        let gridHeight = CGFloat(rows) * cell.height
+        let paddingX = max(0, bounds.width - gridWidth)
+        let paddingY = max(0, bounds.height - gridHeight)
+        let origin = CGPoint(x: paddingX / 2.0, y: paddingY / 2.0)
+
+        return GhosttyGridMetrics(columns: columns, rows: rows, cellSize: cell, origin: origin)
     }
 
     override func viewDidMoveToWindow() {
@@ -106,9 +159,11 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
             )
         }
 
+        frameScheduler.setVisible(window != nil)
         updateDisplayID()
         updateContentScale()
         updateOcclusionState()
+        notifyGridMetricsChange()
         if let surface, window != nil {
             ghostty_surface_refresh(surface)
         }
@@ -117,11 +172,13 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         updateContentScale()
+        notifyGridMetricsChange()
     }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         updateSurfaceSize(for: newSize)
+        notifyGridMetricsChange()
     }
 
     override func updateTrackingAreas() {
@@ -154,18 +211,21 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        frameScheduler.noteInputActivity()
         guard let surface else { return }
         let mods = GhosttyInput.ghosttyMods(event.modifierFlags)
         ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
     }
 
     override func mouseUp(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         guard let surface else { return }
         let mods = GhosttyInput.ghosttyMods(event.modifierFlags)
         ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, mods)
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         guard let surface else { return super.rightMouseDown(with: event) }
         let mods = GhosttyInput.ghosttyMods(event.modifierFlags)
         if ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, mods) {
@@ -175,6 +235,7 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     }
 
     override func rightMouseUp(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         guard let surface else { return super.rightMouseUp(with: event) }
         let mods = GhosttyInput.ghosttyMods(event.modifierFlags)
         if ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, mods) {
@@ -184,12 +245,14 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         guard let surface else { return }
         let mods = GhosttyInput.ghosttyMods(event.modifierFlags)
         ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, mouseButton(from: event.buttonNumber), mods)
     }
 
     override func otherMouseUp(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         guard let surface else { return }
         let mods = GhosttyInput.ghosttyMods(event.modifierFlags)
         ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, mouseButton(from: event.buttonNumber), mods)
@@ -213,18 +276,22 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         mouseMoved(with: event)
     }
 
     override func rightMouseDragged(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         mouseMoved(with: event)
     }
 
     override func otherMouseDragged(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         mouseMoved(with: event)
     }
 
     override func scrollWheel(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         guard let surface else { return }
         var x = event.scrollingDeltaX
         var y = event.scrollingDeltaY
@@ -240,6 +307,10 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     }
 
     override func keyDown(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
+        if menuHandlesKeyEquivalent(event) {
+            return
+        }
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -305,11 +376,12 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
             }
         } else {
             let composing = markedTextStorage.length > 0 || hadMarked
+            let text = composing ? nil : translationEvent.ghosttyCharacters
             _ = keyAction(
                 action,
                 event: event,
                 translationEvent: translationEvent,
-                text: translationEvent.ghosttyCharacters,
+                text: text,
                 composing: composing,
                 modifierFlagsOverride: effectiveMods
             )
@@ -317,11 +389,13 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     }
 
     override func keyUp(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         let effectiveMods = effectiveModifierFlags(for: event)
         _ = keyAction(GHOSTTY_ACTION_RELEASE, event: event, modifierFlagsOverride: effectiveMods)
     }
 
     override func flagsChanged(with event: NSEvent) {
+        frameScheduler.noteInputActivity()
         let mod: UInt32
         switch event.keyCode {
         case 0x39: mod = GHOSTTY_MODS_CAPS.rawValue
@@ -354,9 +428,17 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
         // Prevents NSBeep for unhandled selectors.
     }
 
+    private func menuHandlesKeyEquivalent(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard mods.contains(.command) else { return false }
+        guard let menu = NSApp.mainMenu else { return false }
+        return menu.performKeyEquivalent(with: event)
+    }
+
     private func optionSideFlags(from flags: NSEvent.ModifierFlags) -> (left: Bool, right: Bool) {
-        let left = flags.contains(.leftOptionCompat)
-        let right = flags.contains(.rightOptionCompat)
+        let raw = flags.rawValue
+        let left = (raw & UInt(NX_DEVICELALTKEYMASK)) != 0
+        let right = (raw & UInt(NX_DEVICERALTKEYMASK)) != 0
         return (left: left, right: right)
     }
 
@@ -464,6 +546,7 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     }
 
     func insertText(_ string: Any, replacementRange: NSRange) {
+        frameScheduler.noteInputActivity()
         guard let surface else { return }
 
         var chars = ""
@@ -543,6 +626,7 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
         guard let screen = window?.screen ?? NSScreen.main else { return }
         guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return }
         ghostty_surface_set_display_id(surface, id.uint32Value)
+        frameScheduler.updateDisplay(screen)
     }
 
     private func updateOcclusionState() {
@@ -551,11 +635,19 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
         let state = window.occlusionState
         let visible = state.contains(.visible) || state.isEmpty
         ghostty_surface_set_occlusion(surface, visible)
+        frameScheduler.setOccluded(!visible)
     }
 
     private func setFocus(_ focused: Bool) {
         guard let surface else { return }
         ghostty_surface_set_focus(surface, focused)
+    }
+
+    private func notifyGridMetricsChange() {
+        guard !gridMetricsObservers.isEmpty, let metrics = gridMetrics() else { return }
+        for handler in gridMetricsObservers.values {
+            handler(metrics)
+        }
     }
 
     private func keyAction(
@@ -567,6 +659,9 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
         modifierFlagsOverride: NSEvent.ModifierFlags? = nil
     ) -> Bool {
         guard let surface else { return false }
+        if action == GHOSTTY_ACTION_REPEAT, !composing, shouldThrottleRepeat(event) {
+            return false
+        }
         var keyEvent = event.ghosttyKeyEvent(
             action,
             translationMods: translationEvent?.modifierFlags,
@@ -591,6 +686,28 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(len - 1))
         }
+    }
+
+    func scheduleRender() {
+        frameScheduler.requestRender()
+    }
+
+    private func drawFrame() {
+        guard let surface else { return }
+        let start = CACurrentMediaTime()
+        ghostty_surface_draw(surface)
+        PerformanceMonitor.shared.recordRender(duration: CACurrentMediaTime() - start)
+        PerformanceMonitor.shared.recordFrame(timestamp: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private func shouldThrottleRepeat(_ event: NSEvent) -> Bool {
+        let interval = frameScheduler.repeatThrottleInterval(at: event.timestamp)
+        guard interval > 0 else { return false }
+        if event.timestamp - lastRepeatTimestamp < interval {
+            return true
+        }
+        lastRepeatTimestamp = event.timestamp
+        return false
     }
 
     private func syncPreedit(clearIfNeeded: Bool = true) {
@@ -668,12 +785,6 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
             return .arrow
         }
     }
-}
-
-private extension NSEvent.ModifierFlags {
-    // Raw values match the left/right option modifier bits on macOS.
-    static let leftOptionCompat = NSEvent.ModifierFlags(rawValue: 0x080020)
-    static let rightOptionCompat = NSEvent.ModifierFlags(rawValue: 0x080040)
 }
 
 private extension Optional where Wrapped == String {
