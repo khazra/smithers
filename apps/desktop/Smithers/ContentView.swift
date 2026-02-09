@@ -94,6 +94,7 @@ struct CodeEditor: NSViewRepresentable {
             coord.appliedTheme = theme
         }
         updateIndentGuides(textView: textView, theme: theme, font: font, coordinator: coord)
+        coord.refreshCursorAppearance(textView: textView)
 
         if coord.currentFileURL != fileURL {
             coord.saveViewState(for: coord.currentFileURL, textView: textView, scrollView: scrollView)
@@ -101,6 +102,7 @@ struct CodeEditor: NSViewRepresentable {
             coord.restoreViewState(for: fileURL, textView: textView, scrollView: scrollView)
             coord.updateScrollMetrics(textView: textView, scrollView: scrollView)
             applySelectionRequest(textView: textView, scrollView: scrollView)
+            coord.refreshCursorPosition(textView: textView, restartBlink: false)
             return
         }
 
@@ -114,6 +116,8 @@ struct CodeEditor: NSViewRepresentable {
             textView.insertionPointWidth = Self.cursorWidth(for: font)
             updateIndentGuides(textView: textView, theme: theme, font: font, coordinator: coord)
             coord.updateScrollMetrics(textView: textView, scrollView: scrollView)
+            coord.refreshCursorAppearance(textView: textView)
+            coord.refreshCursorPosition(textView: textView, restartBlink: false)
             return
         }
 
@@ -124,6 +128,7 @@ struct CodeEditor: NSViewRepresentable {
         }
 
         applySelectionRequest(textView: textView, scrollView: scrollView)
+        coord.refreshCursorPosition(textView: textView, restartBlink: false)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -316,7 +321,6 @@ struct CodeEditor: NSViewRepresentable {
         private var cursorObservers: [NSObjectProtocol] = []
         private weak var cursorWindow: NSWindow?
         private var lastCursorRect: NSRect?
-        private var appliedCursorStyle: EditorCursorShape?
         private var scrollObserver: Any?
         private var magnificationRecognizer: NSMagnificationGestureRecognizer?
         private var highlighterCache: [String: TreeSitterHighlighter] = [:]
@@ -397,6 +401,8 @@ struct CodeEditor: NSViewRepresentable {
             } else {
                 highlighter = nil
             }
+            refreshCursorAppearance(textView: textView)
+            refreshCursorPosition(textView: textView, restartBlink: false)
         }
 
         func saveViewState(for url: URL?, textView: STTextView, scrollView: NSScrollView) {
@@ -509,10 +515,190 @@ struct CodeEditor: NSViewRepresentable {
             if let scrollView {
                 updateScrollMetrics(textView: textView, scrollView: scrollView)
             }
+            refreshCursorAppearance(textView: textView)
+            refreshCursorPosition(textView: textView, restartBlink: false)
         }
 
         private func clampedFontSize(_ size: Double) -> Double {
             min(max(size, parent.minFontSize), parent.maxFontSize)
+        }
+
+        private func ensureCursorView(textView: STTextView) {
+            if cursorView?.superview !== textView {
+                let view = EditorCursorView()
+                view.cursorColor = parent.theme.foreground
+                view.outlineColor = parent.theme.foreground.withAlphaComponent(0.6)
+                view.showsOutlineWhenInactive = true
+                view.setVisible(false)
+                textView.addSubview(view, positioned: .above, relativeTo: nil)
+                cursorView = view
+                lastCursorRect = nil
+            }
+            updateCursorWindowObservation(for: textView)
+        }
+
+        func refreshCursorAppearance(textView: STTextView) {
+            ensureCursorView(textView: textView)
+            guard let cursorView else { return }
+            cursorView.cursorColor = parent.theme.foreground
+            cursorView.outlineColor = parent.theme.foreground.withAlphaComponent(0.6)
+            cursorView.showsOutlineWhenInactive = true
+        }
+
+        func refreshCursorPosition(textView: STTextView, selection: NSRange? = nil, restartBlink: Bool) {
+            ensureCursorView(textView: textView)
+            guard let cursorView else { return }
+            let selection = selection ?? textView.selectedRange()
+
+            guard selection.length == 0 else {
+                cursorView.setVisible(false)
+                return
+            }
+
+            guard let caretRect = caretRect(for: textView, location: selection.location) else {
+                cursorView.setVisible(false)
+                return
+            }
+
+            let isFirstResponder = textView.window?.firstResponder === textView
+            guard isFirstResponder else {
+                cursorView.setVisible(false)
+                return
+            }
+
+            let windowIsKey = textView.window?.isKeyWindow ?? true
+            cursorView.isActive = windowIsKey && isFirstResponder
+            cursorView.blinkEnabled = cursorView.isActive
+            cursorView.setVisible(true)
+
+            let font = parent.font
+            let lineHeight = max(caretRect.height, ceil(font.ascender - font.descender + font.leading))
+            let cursorWidth = CodeEditor.cursorWidth(for: font)
+            let cellWidth = cursorCellWidth(textView: textView, font: font, location: selection.location)
+            let shape = parent.cursorStyle
+            let targetRect = cursorRect(
+                caretRect: caretRect,
+                shape: shape,
+                cursorWidth: cursorWidth,
+                cellWidth: cellWidth,
+                lineHeight: lineHeight,
+                isFlipped: textView.isFlipped
+            )
+
+            let motion = cursorMotionKind(from: lastCursorRect, to: targetRect, lineHeight: lineHeight)
+            cursorView.move(to: targetRect, motion: motion, restartBlink: restartBlink)
+            lastCursorRect = targetRect
+        }
+
+        private func updateCursorWindowObservation(for textView: STTextView) {
+            guard cursorWindow !== textView.window else { return }
+            cursorObservers.forEach { NotificationCenter.default.removeObserver($0) }
+            cursorObservers.removeAll()
+            cursorWindow = textView.window
+            guard let window = cursorWindow else { return }
+            let center = NotificationCenter.default
+            let names: [Notification.Name] = [
+                NSWindow.didBecomeKeyNotification,
+                NSWindow.didResignKeyNotification,
+                NSWindow.didBecomeMainNotification,
+                NSWindow.didResignMainNotification,
+            ]
+            for name in names {
+                let token = center.addObserver(forName: name, object: window, queue: .main) { [weak self, weak textView] _ in
+                    guard let self, let textView else { return }
+                    self.refreshCursorPosition(textView: textView, restartBlink: false)
+                }
+                cursorObservers.append(token)
+            }
+        }
+
+        private func caretRect(for textView: STTextView, location: Int) -> NSRect? {
+            let text = textView.attributedString().string as NSString
+            let clamped = min(max(0, location), text.length)
+            let range = NSRange(location: clamped, length: 0)
+            let screenRect = textView.firstRect(forCharacterRange: range, actualRange: nil)
+            if !screenRect.isNull, !screenRect.isInfinite, let window = textView.window {
+                let windowRect = window.convertFromScreen(screenRect)
+                return textView.convert(windowRect, from: nil)
+            }
+            if let layoutManager = textView.layoutManager,
+               let textContainer = textView.textContainer,
+               layoutManager.numberOfGlyphs > 0 {
+                let glyphIndex = max(0, min(layoutManager.numberOfGlyphs - 1, layoutManager.glyphIndexForCharacter(at: clamped)))
+                var rect = layoutManager.boundingRect(
+                    forGlyphRange: NSRange(location: glyphIndex, length: 1),
+                    in: textContainer
+                )
+                rect.origin.x += textView.textContainerOrigin.x
+                rect.origin.y += textView.textContainerOrigin.y
+                return rect
+            }
+            return nil
+        }
+
+        private func cursorCellWidth(textView: STTextView, font: NSFont, location: Int) -> CGFloat {
+            if let layoutManager = textView.layoutManager,
+               let textContainer = textView.textContainer,
+               layoutManager.numberOfGlyphs > 0 {
+                let length = textView.attributedString().length
+                let clamped = max(0, min(location, max(0, length - 1)))
+                let glyphIndex = max(0, min(layoutManager.numberOfGlyphs - 1, layoutManager.glyphIndexForCharacter(at: clamped)))
+                let rect = layoutManager.boundingRect(
+                    forGlyphRange: NSRange(location: glyphIndex, length: 1),
+                    in: textContainer
+                )
+                if rect.width > 0 {
+                    return rect.width
+                }
+            }
+            let sample = "M" as NSString
+            return max(1, round(sample.size(withAttributes: [.font: font]).width))
+        }
+
+        private func cursorRect(
+            caretRect: NSRect,
+            shape: EditorCursorShape,
+            cursorWidth: CGFloat,
+            cellWidth: CGFloat,
+            lineHeight: CGFloat,
+            isFlipped: Bool
+        ) -> NSRect {
+            var rect = caretRect
+            let height = max(1, lineHeight)
+            if height != rect.height {
+                rect.size.height = height
+                if !isFlipped {
+                    rect.origin.y = caretRect.maxY - height
+                }
+            }
+            let lineRect = rect
+            switch shape {
+            case .bar:
+                rect.size.width = max(1, cursorWidth)
+            case .block:
+                rect.size.width = max(cellWidth, cursorWidth)
+            case .underline:
+                rect.size.width = max(cellWidth, cursorWidth)
+                let underlineHeight = max(1, round(cursorWidth))
+                rect.size.height = underlineHeight
+                rect.origin.y = isFlipped
+                    ? lineRect.maxY - underlineHeight
+                    : lineRect.minY
+            }
+            return rect
+        }
+
+        private func cursorMotionKind(
+            from previous: NSRect?,
+            to next: NSRect,
+            lineHeight: CGFloat
+        ) -> EditorCursorView.MotionKind {
+            guard let previous else { return .short }
+            let dx = next.minX - previous.minX
+            let dy = next.minY - previous.minY
+            let distance = hypot(dx, dy)
+            let threshold = max(lineHeight * 2.5, 24)
+            return distance > threshold ? .long : .short
         }
 
         func setTextViewContent(_ textView: STTextView, text: String) {
@@ -544,6 +730,10 @@ struct CodeEditor: NSViewRepresentable {
             if let scrollView {
                 updateScrollMetrics(textView: textView, scrollView: scrollView)
             }
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let self, let textView else { return }
+                self.refreshCursorPosition(textView: textView, restartBlink: true)
+            }
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -554,6 +744,17 @@ struct CodeEditor: NSViewRepresentable {
                 saveViewState(for: currentFileURL, textView: textView, scrollView: scrollView)
             }
             updateBracketHighlights(textView: textView, selection: selection)
+            refreshCursorPosition(textView: textView, selection: selection, restartBlink: true)
+        }
+
+        func textDidBeginEditing(_ notification: Notification) {
+            guard let textView = notification.object as? STTextView else { return }
+            refreshCursorPosition(textView: textView, restartBlink: false)
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            guard let textView = notification.object as? STTextView else { return }
+            refreshCursorPosition(textView: textView, restartBlink: false)
         }
 
         private func updateCursorPosition(textView: STTextView, selection: NSRange) {
@@ -845,7 +1046,20 @@ struct ContentView: View {
                                 }
                             } else {
                                 if workspace.isNvimModeEnabled {
-                                    if let nvimView = workspace.nvimTerminalView {
+                                    if let failure = workspace.nvimFailure {
+                                        pane(
+                                            NvimRecoveryView(
+                                                failure: failure,
+                                                theme: workspace.theme,
+                                                onRestart: { workspace.restartNvim() },
+                                                onDisable: { workspace.toggleNvimMode() },
+                                                onRevealReport: { url in
+                                                    workspace.revealInFinder(url)
+                                                }
+                                            ),
+                                            pane: .editor
+                                        )
+                                    } else if let nvimView = workspace.nvimTerminalView {
                                         pane(
                                             TerminalTabView(
                                                 view: nvimView,
@@ -1057,6 +1271,97 @@ struct ContentView: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: 260)
+    }
+}
+
+private struct NvimRecoveryView: View {
+    let failure: NvimFailure
+    let theme: AppTheme
+    let onRestart: () -> Void
+    let onDisable: () -> Void
+    let onRevealReport: ((URL) -> Void)?
+
+    private var title: String {
+        switch failure.kind {
+        case .startup:
+            return "Neovim Failed to Start"
+        case .crash:
+            return "Neovim Closed"
+        }
+    }
+
+    private var iconName: String {
+        switch failure.kind {
+        case .startup:
+            return "xmark.octagon.fill"
+        case .crash:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var body: some View {
+        VStack {
+            VStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.system(size: Typography.iconL))
+                    .foregroundStyle(theme.accentColor)
+
+                Text(title)
+                    .font(.system(size: Typography.xl, weight: .semibold))
+                    .foregroundStyle(theme.foregroundColor)
+
+                Text(failure.message)
+                    .font(.system(size: Typography.base))
+                    .foregroundStyle(theme.mutedForegroundColor)
+                    .multilineTextAlignment(.center)
+
+                if let detail = failure.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: Typography.s))
+                        .foregroundStyle(theme.mutedForegroundColor)
+                        .multilineTextAlignment(.center)
+                }
+
+                if let reportURL = failure.reportURL {
+                    VStack(spacing: 4) {
+                        Text("Report saved to:")
+                            .font(.system(size: Typography.s, weight: .medium))
+                            .foregroundStyle(theme.mutedForegroundColor)
+                        Text(reportURL.path)
+                            .font(.system(size: Typography.xs, design: .monospaced))
+                            .foregroundStyle(theme.mutedForegroundColor)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(3)
+                            .truncationMode(.middle)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Button("Restart Neovim", action: onRestart)
+                        .buttonStyle(.borderedProminent)
+                    if let reportURL = failure.reportURL {
+                        Button("Reveal Report") {
+                            onRevealReport?(reportURL)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    Button("Disable Neovim Mode", action: onDisable)
+                        .buttonStyle(.bordered)
+                }
+            }
+            .padding(24)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(theme.panelBackgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(theme.panelBorderColor)
+            )
+            .frame(maxWidth: 520)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.backgroundColor)
     }
 }
 
