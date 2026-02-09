@@ -791,10 +791,9 @@ class WorkspaceState: ObservableObject {
             Task { [weak self] in
                 guard let self else { return }
                 do {
-                    _ = try await self.ensureNvimStarted()
+                    _ = try await self.ensureNvimStarted(force: true)
                 } catch {
-                    self.appendErrorMessage("Neovim failed to start: \(error.localizedDescription)")
-                    self.isNvimModeEnabled = false
+                    self.handleNvimStartFailure(error)
                 }
             }
         }
@@ -1140,6 +1139,176 @@ class WorkspaceState: ObservableObject {
             fh.closeFile()
         } else {
             FileManager.default.createFile(atPath: path, contents: Data(line.utf8))
+        }
+    }
+
+    private func clearNvimFailure() {
+        nvimFailure = nil
+    }
+
+    private func nvimSupportDirectory() -> URL? {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return base
+            .appendingPathComponent("Smithers", isDirectory: true)
+            .appendingPathComponent("Nvim", isDirectory: true)
+    }
+
+    private func makeNvimLogFileURL() -> URL? {
+        guard let base = nvimSupportDirectory() else { return nil }
+        let dir = base.appendingPathComponent("Logs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let timestamp = Self.nvimReportDateFormatter.string(from: Date())
+        let suffix = String(UUID().uuidString.prefix(8))
+        return dir.appendingPathComponent("nvim-\(timestamp)-\(suffix).log")
+    }
+
+    private func writeNvimReport(kind: NvimFailureKind, error: Error?) -> URL? {
+        guard let base = nvimSupportDirectory() else { return nil }
+        let dir = base.appendingPathComponent("Reports", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let timestamp = Self.nvimReportDateFormatter.string(from: Date())
+        let suffix = String(UUID().uuidString.prefix(8))
+        let reportURL = dir.appendingPathComponent("nvim-report-\(timestamp)-\(suffix).txt")
+
+        var lines: [String] = []
+        lines.append("Smithers Neovim Report")
+        lines.append("Timestamp: \(Self.debugDateFormatter.string(from: Date()))")
+        lines.append("Failure: \(kind == .startup ? "Startup failure" : "Crash")")
+        if let error {
+            lines.append("Error: \(error.localizedDescription)")
+        }
+        if let rootDirectory {
+            lines.append("Workspace: \(rootDirectory.path)")
+        }
+        lines.append("Neovim path setting: \(nvimPathStatusMessage)")
+        if let command = nvimTerminalView?.command {
+            lines.append("Command: \(command)")
+        }
+        if let logURL = nvimLogFileURL {
+            lines.append("NVIM_LOG_FILE: \(logURL.path)")
+        }
+        if let selectedFileURL, isRegularFileURL(selectedFileURL) {
+            lines.append("Selected file: \(selectedFileURL.path)")
+        }
+        let regularFiles = openFiles.filter { isRegularFileURL($0) }
+        lines.append("Open files: \(regularFiles.count)")
+        if !regularFiles.isEmpty {
+            let maxList = min(12, regularFiles.count)
+            lines.append("Open file list (first \(maxList)):")
+            for url in regularFiles.prefix(maxList) {
+                lines.append("- \(url.path)")
+            }
+            if regularFiles.count > maxList {
+                lines.append("... +\(regularFiles.count - maxList) more")
+            }
+        }
+
+        lines.append("")
+        lines.append("---- Smithers debug log (tail) ----")
+        if let debugTail = readTail(fromPath: "/tmp/smithers-nvim-debug.log", maxLines: 200) {
+            lines.append(debugTail)
+        } else {
+            lines.append("(no debug log)")
+        }
+
+        if let logURL = nvimLogFileURL {
+            lines.append("")
+            lines.append("---- Neovim log (tail) ----")
+            if let nvimTail = readTail(from: logURL, maxLines: 200) {
+                lines.append(nvimTail)
+            } else {
+                lines.append("(no Neovim log)")
+            }
+        }
+
+        let report = lines.joined(separator: "\n")
+        do {
+            try report.write(to: reportURL, atomically: true, encoding: .utf8)
+            return reportURL
+        } catch {
+            return nil
+        }
+    }
+
+    private func readTail(fromPath path: String, maxLines: Int) -> String? {
+        let url = URL(fileURLWithPath: path)
+        return readTail(from: url, maxLines: maxLines)
+    }
+
+    private func readTail(from url: URL, maxLines: Int) -> String? {
+        guard maxLines > 0 else { return nil }
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard !lines.isEmpty else { return nil }
+        return lines.suffix(maxLines).joined(separator: "\n")
+    }
+
+    @discardableResult
+    private func recordNvimFailure(kind: NvimFailureKind, error: Error?, message: String) -> Bool {
+        if nvimFailure != nil { return false }
+        let reportURL = writeNvimReport(kind: kind, error: error)
+        nvimFailure = NvimFailure(
+            kind: kind,
+            message: message,
+            detail: error?.localizedDescription,
+            timestamp: Date(),
+            reportURL: reportURL,
+            logURL: nvimLogFileURL
+        )
+        return true
+    }
+
+    private func handleNvimStartFailure(_ error: Error) {
+        guard !(error is CancellationError) else { return }
+        if recordNvimFailure(kind: .startup, error: error, message: "Neovim failed to start.") {
+            appendErrorMessage("Neovim failed to start: \(error.localizedDescription)")
+        }
+        stopNvim()
+    }
+
+    private func handleNvimRuntimeFailure(_ error: Error?, message: String) {
+        if recordNvimFailure(kind: .crash, error: error, message: message) {
+            if let error {
+                appendErrorMessage("Neovim error: \(error.localizedDescription)")
+            } else {
+                appendErrorMessage(message)
+            }
+        }
+        stopNvim()
+    }
+
+    func restartNvim() {
+        guard isNvimModeEnabled else { return }
+        let regularFiles = openFiles.filter { isRegularFileURL($0) }
+        let selected = selectedFileURL
+        clearNvimFailure()
+        stopNvim()
+        maybeHideWindowForNvimStart()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let controller = try await self.ensureNvimStarted(force: true)
+                await self.restoreNvimWorkspaceState(controller: controller, openFiles: regularFiles, selected: selected)
+            } catch {
+                self.handleNvimStartFailure(error)
+            }
+        }
+    }
+
+    private func restoreNvimWorkspaceState(
+        controller: NvimController,
+        openFiles: [URL],
+        selected: URL?
+    ) async {
+        let regularFiles = openFiles.filter { isRegularFileURL($0) }
+        for url in regularFiles where url != selected {
+            try? await controller.openFile(url, line: nil, column: nil)
+        }
+        if let selected, isRegularFileURL(selected) {
+            try? await controller.openFile(selected, line: nil, column: nil)
         }
     }
 
@@ -1503,15 +1672,32 @@ class WorkspaceState: ObservableObject {
         nvimSaveTask = Task { @MainActor [weak self] in
             _ = await previous?.result
             guard let self else { return }
+            if nvimFailure != nil {
+                self.showToast("Restart Neovim to save")
+                return
+            }
+            let controller: NvimController
             do {
-                let controller = try await self.ensureNvimStarted()
+                controller = try await self.ensureNvimStarted()
+            } catch {
+                if case NvimModeError.recoveryRequired = error {
+                    return
+                }
+                self.handleNvimStartFailure(error)
+                return
+            }
+            do {
                 let message = try await operation(controller)
                 let buffers = try await controller.listModifiedBuffers()
                 self.setNvimModifiedBuffers(buffers)
                 self.showToast(message)
             } catch {
-                self.appendErrorMessage("Save failed: \(error.localizedDescription)")
-                self.showToast("Save failed")
+                if error is NvimRPCError || error is NvimController.ControllerError {
+                    self.handleNvimRuntimeFailure(error, message: "Neovim exited unexpectedly.")
+                } else {
+                    self.appendErrorMessage("Save failed: \(error.localizedDescription)")
+                    self.showToast("Save failed")
+                }
             }
         }
     }
@@ -1596,17 +1782,26 @@ class WorkspaceState: ObservableObject {
         setEditorText("")
         Task { [weak self] in
             guard let self else { return }
+            let controller: NvimController
             do {
-                let controller = try await self.ensureNvimStarted()
+                controller = try await self.ensureNvimStarted()
+            } catch {
+                if case NvimModeError.recoveryRequired = error {
+                    return
+                }
+                self.handleNvimStartFailure(error)
+                return
+            }
+            do {
                 Self.debugLog("[WorkspaceState] openFileInNvim: calling openFile")
                 try await controller.openFile(normalizedURL, line: line, column: column)
                 Self.debugLog("[WorkspaceState] openFileInNvim: openFile completed OK")
             } catch {
                 Self.debugLog("[WorkspaceState] openFileInNvim error: \(error)")
-                self.appendErrorMessage("Neovim error: \(error.localizedDescription)")
                 if error is NvimRPCError || error is NvimController.ControllerError {
-                    self.isNvimModeEnabled = false
-                    self.stopNvim()
+                    self.handleNvimRuntimeFailure(error, message: "Neovim exited unexpectedly.")
+                } else {
+                    self.appendErrorMessage("Neovim error: \(error.localizedDescription)")
                 }
             }
         }
@@ -1624,21 +1819,21 @@ class WorkspaceState: ObservableObject {
         }
         isNvimModeEnabled = true
         nvimMode = .normal
+        clearNvimFailure()
         maybeHideWindowForNvimStart()
         Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.ensureNvimStarted()
+                _ = try await self.ensureNvimStarted(force: true)
             } catch {
-                self.appendErrorMessage("Neovim failed to start: \(error.localizedDescription)")
-                self.isNvimModeEnabled = false
-                self.stopNvim()
+                self.handleNvimStartFailure(error)
             }
         }
     }
 
     private func disableNvimMode() {
         isNvimModeEnabled = false
+        clearNvimFailure()
         stopNvim()
         theme = .default
         if let selectedFileURL, isRegularFileURL(selectedFileURL) {
@@ -1646,14 +1841,22 @@ class WorkspaceState: ObservableObject {
         }
     }
 
-    private func ensureNvimStarted() async throws -> NvimController {
+    private func ensureNvimStarted(force: Bool = false) async throws -> NvimController {
         if let controller = nvimController, nvimStartTask == nil {
             return controller
         }
         if let task = nvimStartTask {
             return try await task.value
         }
+        if nvimFailure != nil && !force {
+            throw NvimModeError.recoveryRequired
+        }
+        if force {
+            clearNvimFailure()
+        }
 
+        let logURL = makeNvimLogFileURL()
+        nvimLogFileURL = logURL
         let task = Task { [weak self] () throws -> NvimController in
             guard let self else { throw CancellationError() }
             guard let rootDirectory = self.rootDirectory else {
@@ -1666,7 +1869,8 @@ class WorkspaceState: ObservableObject {
                 ghosttyApp: self.ghosttyApp,
                 workingDirectory: rootDirectory.path,
                 nvimPath: nvimPath,
-                optionAsMeta: optionAsMeta
+                optionAsMeta: optionAsMeta,
+                logFilePath: logURL?.path
             )
             self.nvimController = controller
             self.nvimTerminalView = controller.terminalView
@@ -1709,9 +1913,12 @@ class WorkspaceState: ObservableObject {
 
     private func handleNvimTerminalClosed() {
         guard isNvimModeEnabled else { return }
-        appendErrorMessage("Neovim exited.")
-        isNvimModeEnabled = false
-        stopNvim()
+        if nvimFailure != nil { return }
+        if nvimStartTask != nil {
+            handleNvimStartFailure(NvimModeError.startupExited)
+        } else {
+            handleNvimRuntimeFailure(nil, message: "Neovim exited unexpectedly.")
+        }
     }
 
     func handleNvimReady() {
