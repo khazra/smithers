@@ -17,6 +17,7 @@ struct SmithersApp: App {
                     workspace.handleOpenURL(url) ? .handled : .systemAction
                 })
                 .onAppear {
+                    workspace.hideWindowForLaunch()
                     handleLaunchArguments()
                     appDelegate.workspace = workspace
                     windowCloseDelegate.workspace = workspace
@@ -45,6 +46,10 @@ struct SmithersApp: App {
                     workspace.openFolderPanel()
                 }
                 .keyboardShortcut("O", modifiers: [.command, .shift])
+                Button("Search in Files...") {
+                    workspace.showSearchPanel()
+                }
+                .keyboardShortcut("F", modifiers: [.command, .shift])
             }
             CommandGroup(after: .newItem) {
                 Button("New Terminal") {
@@ -62,12 +67,9 @@ struct SmithersApp: App {
                 }
                 .keyboardShortcut("P", modifiers: [.command])
             }
-            CommandGroup(after: .textEditing) {
-                Button("Find in Files...") {
-                    workspace.showSearchPanel()
-                }
-                .keyboardShortcut("F", modifiers: [.command, .shift])
-            }
+        }
+        Settings {
+            PreferencesView(workspace: workspace)
         }
     }
 
@@ -80,7 +82,12 @@ struct SmithersApp: App {
             let x = screenFrame.origin.x + (screenFrame.width - width) / 2
             let y = screenFrame.origin.y + (screenFrame.height - height) / 2
             if let window = NSApp.windows.first(where: { $0.isKeyWindow || $0.isMainWindow }) {
-                window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
+                if let savedFrame = WindowCloseDelegate.loadWindowFrame() {
+                    window.setFrame(adjustedFrame(savedFrame), display: true)
+                } else {
+                    window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
+                }
+                workspace.showWindowAfterLaunch()
             }
         }
     }
@@ -95,6 +102,44 @@ struct SmithersApp: App {
             window.title = ""
             window.delegate = windowCloseDelegate
         }
+    }
+
+    private func adjustedFrame(_ frame: NSRect) -> NSRect {
+        for screen in NSScreen.screens {
+            if screen.visibleFrame.intersects(frame) {
+                return clampFrame(frame, to: screen.visibleFrame)
+            }
+        }
+        guard let screen = NSScreen.main else { return frame }
+        let visible = screen.visibleFrame
+        let width = min(frame.width, visible.width)
+        let height = min(frame.height, visible.height)
+        let x = visible.origin.x + (visible.width - width) / 2
+        let y = visible.origin.y + (visible.height - height) / 2
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func clampFrame(_ frame: NSRect, to bounds: NSRect) -> NSRect {
+        var clamped = frame
+        if clamped.width > bounds.width {
+            clamped.size.width = bounds.width
+        }
+        if clamped.height > bounds.height {
+            clamped.size.height = bounds.height
+        }
+        if clamped.minX < bounds.minX {
+            clamped.origin.x = bounds.minX
+        }
+        if clamped.maxX > bounds.maxX {
+            clamped.origin.x = bounds.maxX - clamped.width
+        }
+        if clamped.minY < bounds.minY {
+            clamped.origin.y = bounds.minY
+        }
+        if clamped.maxY > bounds.maxY {
+            clamped.origin.y = bounds.maxY - clamped.height
+        }
+        return clamped
     }
 
     private func handleLaunchArguments() {
