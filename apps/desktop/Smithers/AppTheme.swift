@@ -22,6 +22,7 @@ struct AppTheme: Equatable {
     var tabForeground: NSColor
     var tabBorder: NSColor
     var selectionBackground: NSColor
+    var matchingBracket: NSColor
     var accent: NSColor
     var lineNumberForeground: NSColor
     var lineNumberSelectedForeground: NSColor
@@ -53,9 +54,10 @@ struct AppTheme: Equatable {
         tabBarBackground: NSColor(red: 0.10, green: 0.11, blue: 0.13, alpha: 1),
         tabSelectedBackground: NSColor.white.withAlphaComponent(0.10),
         tabSelectedForeground: .white,
-        tabForeground: NSColor.white.withAlphaComponent(0.85),
+        tabForeground: NSColor.white.withAlphaComponent(0.60),
         tabBorder: NSColor.white.withAlphaComponent(0.12),
         selectionBackground: NSColor.white.withAlphaComponent(0.12),
+        matchingBracket: NSColor.white.withAlphaComponent(0.18),
         accent: .systemBlue,
         lineNumberForeground: NSColor(white: 0.55, alpha: 1),
         lineNumberSelectedForeground: NSColor(white: 0.55, alpha: 1),
@@ -116,6 +118,7 @@ struct AppTheme: Equatable {
 
         let selectionBackground = selection
             ?? tabSelectedBackground.withAlphaComponent(isLight ? 0.20 : 0.30)
+        let matchingBracket = selectionBackground.withAlphaComponent(isLight ? 0.35 : 0.45)
 
         let accent = menuSelected?.bg
             ?? tabSelected?.bg
@@ -148,6 +151,7 @@ struct AppTheme: Equatable {
             tabForeground: tabForeground,
             tabBorder: panelBorder,
             selectionBackground: selectionBackground,
+            matchingBracket: matchingBracket,
             accent: accent,
             lineNumberForeground: lineNumberForeground,
             lineNumberSelectedForeground: lineNumberSelectedForeground,
@@ -177,6 +181,7 @@ struct AppTheme: Equatable {
             tabForeground,
             tabBorder,
             selectionBackground,
+            matchingBracket,
             accent,
             lineNumberForeground,
             lineNumberSelectedForeground,
@@ -210,6 +215,7 @@ extension AppTheme {
     var tabForegroundColor: Color { Color(nsColor: tabForeground) }
     var tabBorderColor: Color { Color(nsColor: tabBorder) }
     var selectionBackgroundColor: Color { Color(nsColor: selectionBackground) }
+    var matchingBracketColor: Color { Color(nsColor: matchingBracket) }
     var accentColor: Color { Color(nsColor: accent) }
     var lineNumberBackgroundColor: Color { Color(nsColor: lineNumberBackground) }
     var lineNumberForegroundColor: Color { Color(nsColor: lineNumberForeground) }
