@@ -20,13 +20,13 @@ final class CodexCompletionService {
     }
 
     private final class CompletionRequest {
-        let turnId: String
+        var turnId: String?
         var buffer: String
         let onDelta: @MainActor (String) -> Void
         var continuation: CheckedContinuation<String, Error>?
         var isCompleted = false
 
-        init(turnId: String, onDelta: @escaping @MainActor (String) -> Void, continuation: CheckedContinuation<String, Error>) {
+        init(turnId: String? = nil, onDelta: @escaping @MainActor (String) -> Void, continuation: CheckedContinuation<String, Error>) {
             self.turnId = turnId
             self.buffer = ""
             self.onDelta = onDelta
@@ -73,10 +73,26 @@ final class CodexCompletionService {
     ) async throws -> String {
         guard service.isRunning else { throw CompletionError.notRunning }
         cancelActiveRequest()
-        let turnId = try await service.sendMessage(prompt)
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
-                activeRequest = CompletionRequest(turnId: turnId, onDelta: onDelta, continuation: continuation)
+                let request = CompletionRequest(onDelta: onDelta, continuation: continuation)
+                activeRequest = request
+
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    do {
+                        let startedTurnId = try await self.service.sendMessage(prompt)
+                        if request.turnId == nil {
+                            request.turnId = startedTurnId
+                        } else if request.turnId != startedTurnId {
+                            request.finish(.failure(CompletionError.serviceError("Mismatched turnId")))
+                            self.activeRequest = nil
+                        }
+                    } catch {
+                        request.finish(.failure(error))
+                        self.activeRequest = nil
+                    }
+                }
             }
         }, onCancel: {
             Task { @MainActor [weak self] in
@@ -97,17 +113,25 @@ final class CodexCompletionService {
 
     private func handle(_ event: CodexEvent) {
         guard let activeRequest else { return }
+        func matches(_ turnId: String) -> Bool {
+            if activeRequest.turnId == nil {
+                activeRequest.turnId = turnId
+                return true
+            }
+            return activeRequest.turnId == turnId
+        }
+
         switch event {
         case .agentMessageDelta(let turnId, let text):
-            guard turnId == activeRequest.turnId else { return }
+            guard matches(turnId) else { return }
             activeRequest.buffer += text
             activeRequest.onDelta(activeRequest.buffer)
         case .agentMessageCompleted(let turnId, let text):
-            guard turnId == activeRequest.turnId else { return }
+            guard matches(turnId) else { return }
             activeRequest.finish(.success(text))
             self.activeRequest = nil
         case .turnCompleted(let turnId, let status):
-            guard turnId == activeRequest.turnId else { return }
+            guard matches(turnId) else { return }
             if status == "completed" {
                 activeRequest.finish(.success(activeRequest.buffer))
                 self.activeRequest = nil
