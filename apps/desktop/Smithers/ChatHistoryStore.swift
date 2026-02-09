@@ -5,6 +5,7 @@ import CoreGraphics
 enum ChatHistoryStore {
     private static let currentVersion = 2
 
+    @MainActor
     static func loadHistory(for rootDirectory: URL) -> [ChatMessage]? {
         guard let url = historyURL(for: rootDirectory) else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }
