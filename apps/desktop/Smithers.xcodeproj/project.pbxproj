@@ -117,6 +117,7 @@
 		AB403FF3EE585DFE8FB62A66 /* SmithersUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmithersUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		ACDA054A9F51B9E7A05B82A6 /* FileItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileItem.swift; sourceTree = "<group>"; };
 		B483B2FA9B2637CEF152C961 /* WorkspaceStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStateTests.swift; sourceTree = "<group>"; };
+		B89E8985F8524B9353DCC289 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		BB1A5DC923E5D8AE13DED3C7 /* SmithersApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmithersApp.swift; sourceTree = "<group>"; };
 		C0F3384268C43DE31057DAB0 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = GhosttyKit.xcframework; path = ../../ghostty/macos/GhosttyKit.xcframework; sourceTree = "<group>"; };
 		C4132A0BEE89C42A7FB1DC59 /* GhosttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyApp.swift; sourceTree = "<group>"; };
@@ -176,6 +177,7 @@
 				C4132A0BEE89C42A7FB1DC59 /* GhosttyApp.swift */,
 				0D40426E1854161EE406410C /* GhosttyInput.swift */,
 				8933CC7D6E370077FDBD3EFA /* GhosttyTerminalView.swift */,
+				B89E8985F8524B9353DCC289 /* Info.plist */,
 				48F35C80E0660E789DB10C42 /* JSONRPCTransport.swift */,
 				A3D95778A6AB4902483084FB /* KeyboardShortcutsModel.swift */,
 				D42173E9BC66FFC125C018D0 /* KeyboardShortcutsPanel.swift */,
@@ -472,7 +474,8 @@
 					"\".\"",
 					"\"../../ghostty/macos\"",
 				);
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Smithers/Info.plist;
 				INFOPLIST_KEY_SUFeedURL = "$(SPARKLE_FEED_URL)";
 				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_KEY)";
 				INFOPLIST_KEY_SUSnapshotFeedURL = "$(SPARKLE_SNAPSHOT_FEED_URL)";
@@ -563,7 +566,8 @@
 					"\".\"",
 					"\"../../ghostty/macos\"",
 				);
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Smithers/Info.plist;
 				INFOPLIST_KEY_SUFeedURL = "$(SPARKLE_FEED_URL)";
 				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_KEY)";
 				INFOPLIST_KEY_SUSnapshotFeedURL = "$(SPARKLE_SNAPSHOT_FEED_URL)";

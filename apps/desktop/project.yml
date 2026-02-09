@@ -52,6 +52,7 @@ targets:
     platform: macOS
     sources:
       - Smithers
+      - SmithersShared
     dependencies:
       - package: Sparkle
         product: Sparkle
@@ -126,5 +127,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.smithers.desktop.uitests
         GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.10"
+        CODE_SIGN_STYLE: Automatic
+
+  SmithersCLI:
+    type: tool
+    platform: macOS
+    sources:
+      - SmithersCLI
+      - SmithersShared
+    settings:
+      base:
+        PRODUCT_NAME: smithers
         SWIFT_VERSION: "5.10"
         CODE_SIGN_STYLE: Automatic
