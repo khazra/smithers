@@ -499,11 +499,10 @@ final class MultiCursorTextView: STTextView {
 
         guard !payloads.isEmpty else { return false }
 
-        let orderedRanges = ranges.sorted { $0.location < $1.location }
         var replacements: [(NSTextRange, String)] = []
-        replacements.reserveCapacity(orderedRanges.count)
+        replacements.reserveCapacity(ranges.count)
 
-        for (idx, range) in orderedRanges.enumerated() {
+        for (idx, range) in ranges.enumerated() {
             guard let textRange = NSTextRange(range, in: textContentManager) else { continue }
             let payload = payloads[idx % payloads.count]
             replacements.append((textRange, payload))
