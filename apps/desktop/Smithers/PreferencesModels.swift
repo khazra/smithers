@@ -58,3 +58,29 @@ enum ScrollbarVisibilityMode: String, CaseIterable, Identifiable, Codable {
         }
     }
 }
+
+enum UpdateChannel: String, CaseIterable, Identifiable, Codable {
+    case release
+    case snapshot
+
+    static let userDefaultsKey = "smithers.updateChannel"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .release:
+            return "Release"
+        case .snapshot:
+            return "Snapshot"
+        }
+    }
+
+    static func loadFromDefaults() -> UpdateChannel {
+        if let raw = UserDefaults.standard.string(forKey: userDefaultsKey),
+           let value = UpdateChannel(rawValue: raw) {
+            return value
+        }
+        return .release
+    }
+}
