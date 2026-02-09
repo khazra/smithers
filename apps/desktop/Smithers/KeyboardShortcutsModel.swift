@@ -97,6 +97,13 @@ enum ShortcutCatalog {
             category: .general,
             context: .always
         ),
+        ShortcutEntry(
+            id: "toggle-shortcuts",
+            keys: "⌘/",
+            label: "Toggle Shortcuts",
+            category: .general,
+            context: .always
+        ),
 
         // Tabs (tmux prefix)
         ShortcutEntry(
