@@ -73,12 +73,10 @@ final class NvimController {
     private var notificationsTask: Task<Void, Never>?
     private var isRunning = false
     private var isReady = false
-    private var uiAttached = false
-    private var gridMetricsObserver: UUID?
-    private var lastGridSize: (rows: Int, cols: Int)?
     private var bufferByURL: [URL: Int64] = [:]
     private var urlByBuffer: [Int64: URL] = [:]
     private var uiAttached = false
+    private var uiAttachInFlight = false
     private var lastUiSize: (columns: Int, rows: Int)?
     private var gridMetricsObserver: UUID?
     private var gridSizes: [Int64: GridSize] = [:]
@@ -198,8 +196,10 @@ final class NvimController {
     }
 
     private func attachUiIfNeeded() async throws {
-        guard !uiAttached else { return }
+        guard !uiAttached, !uiAttachInFlight else { return }
         guard let metrics = terminalView.gridMetrics() else { return }
+        uiAttachInFlight = true
+        defer { uiAttachInFlight = false }
         let options: [String: MsgPackValue] = [
             "rgb": .bool(true),
             "ext_multigrid": .bool(true),
@@ -221,6 +221,7 @@ final class NvimController {
     private func detachUiIfNeeded() {
         guard uiAttached else { return }
         uiAttached = false
+        uiAttachInFlight = false
         lastUiSize = nil
         Task { [weak self] in
             guard let self else { return }
