@@ -173,6 +173,11 @@ final class TreeSitterHighlighter {
         let source = text
         let length = (source as NSString).length
         if length > Self.maxHighlightCharacters {
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let self, let textView else { return }
+                guard currentID == self.requestID else { return }
+                self.applyHighlights([], errorRanges: [], source: source, textView: textView)
+            }
             return
         }
 
@@ -180,6 +185,7 @@ final class TreeSitterHighlighter {
 
         parseQueue.async { [weak self, weak textView] in
             guard let self else { return }
+            guard currentID == self.requestID else { return }
             guard let tree = self.parser.parse(source) else { return }
             let highlights = self.computeHighlights(tree: tree, query: query, text: source)
             let errorRanges = self.collectErrorRanges(from: tree)
