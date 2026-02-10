@@ -4,7 +4,7 @@ import { buildContext } from "../context";
 import { loadInput, loadOutputs } from "../db/snapshot";
 import { ensureSmithersTables } from "../db/ensure";
 import { SmithersDb } from "../db/adapter";
-import { selectOutputRow, upsertOutputRow, validateOutput, validateExistingOutput, getAgentOutputSchema } from "../db/output";
+import { selectOutputRow, upsertOutputRow, validateOutput, validateExistingOutput, getAgentOutputSchema, describeSchemaShape } from "../db/output";
 import { validateInput } from "../db/input";
 import { schemaSignature } from "../db/schema-signature";
 import { canonicalizeXml } from "../utils/xml";
@@ -676,13 +676,19 @@ async function executeTask(
             }
           }
           
-          // If no JSON found, send a follow-up prompt asking for just the JSON
+          // If no JSON found, send a follow-up prompt asking for just the JSON with schema info
           if (output === undefined && desc.agent) {
-            const jsonPrompt = `You have completed your task. Now you MUST output ONLY a JSON object (no other text) with the required fields as specified in the original prompt. Output ONLY valid JSON, nothing else.`;
+            const schemaDesc = describeSchemaShape(desc.outputTable as any);
+            const jsonPrompt = [
+              `You have completed your task. Now you MUST output ONLY a valid JSON object (no other text) with exactly these fields and types:`,
+              schemaDesc,
+              ``,
+              `Output ONLY the JSON object, nothing else.`,
+            ].join("\n");
             const retryResult = await desc.agent.generate({
               options: undefined as any,
               prompt: jsonPrompt,
-              timeout: desc.timeoutMs ? { totalMs: 30000 } : undefined,
+              timeout: { totalMs: 60000 },
             });
             const retryText = (retryResult as any).text ?? "";
             try {
@@ -746,7 +752,63 @@ async function executeTask(
         }
       }
       const payloadWithKeys = { ...(payload ?? {}), runId, nodeId: desc.nodeId, iteration: desc.iteration };
-      const validation = validateOutput(desc.outputTable as any, payloadWithKeys);
+      let validation = validateOutput(desc.outputTable as any, payloadWithKeys);
+
+      // Schema-validation retry: if the agent returned parseable JSON but it
+      // doesn't match the Zod schema, re-prompt with the error and expected
+      // shape up to 2 times before giving up.
+      const MAX_SCHEMA_RETRIES = 2;
+      let schemaRetry = 0;
+      while (!validation.ok && desc.agent && schemaRetry < MAX_SCHEMA_RETRIES) {
+        schemaRetry++;
+        const schemaDesc = describeSchemaShape(desc.outputTable as any);
+        const zodIssues = validation.error?.issues
+          ?.map((iss: any) => `  - ${(iss.path ?? []).join(".")}: ${iss.message}`)
+          .join("\n") ?? "Unknown validation error";
+        const schemaRetryPrompt = [
+          `Your previous output did not match the required schema. Validation errors:`,
+          zodIssues,
+          ``,
+          `You MUST output ONLY a valid JSON object with exactly these fields and types:`,
+          schemaDesc,
+          ``,
+          `Output ONLY the JSON object, no other text.`,
+        ].join("\n");
+
+        const schemaRetryResult = await (desc.agent as any).generate({
+          options: undefined as any,
+          prompt: schemaRetryPrompt,
+          timeout: { totalMs: 60000 },
+        });
+        const retryText = ((schemaRetryResult as any).text ?? "").trim();
+
+        // Try to parse the retry response
+        let retryOutput: any;
+        try {
+          if (retryText.startsWith("{")) {
+            retryOutput = JSON.parse(retryText);
+          }
+        } catch {
+          // Not valid JSON directly, try extraction
+        }
+        if (retryOutput === undefined) {
+          // Try code-fence extraction
+          const fenceMatch = retryText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+          if (fenceMatch) {
+            try { retryOutput = JSON.parse(fenceMatch[1]!); } catch {}
+          }
+        }
+
+        if (retryOutput && typeof retryOutput === "object") {
+          payload = retryOutput;
+          const retryPayload = { ...retryOutput, runId, nodeId: desc.nodeId, iteration: desc.iteration };
+          validation = validateOutput(desc.outputTable as any, retryPayload);
+          if (validation.ok) {
+            payload = validation.data;
+          }
+        }
+      }
+
       if (!validation.ok) {
         throw validation.error;
       }
