@@ -1,0 +1,188 @@
+---
+title: <Ralph>
+description: Iterative loop that re-executes its children until a condition is met or the maximum iteration count is reached.
+---
+
+`<Ralph>` repeats its children in a loop. On each iteration, the `until` condition is re-evaluated. When the condition becomes `true`, the loop stops. A `maxIterations` safety limit prevents infinite loops.
+
+## Import
+
+```tsx
+import { Ralph } from "smithers";
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | auto-generated | Optional identifier for the loop. Useful when a workflow contains multiple `<Ralph>` loops. Auto-generated from tree position if omitted. |
+| `until` | `boolean` | **(required)** | Stop condition. Re-evaluated each iteration. When `true`, the loop exits and the workflow proceeds to the next node. |
+| `maxIterations` | `number` | `5` | Maximum number of iterations allowed. The loop stops after this many iterations regardless of the `until` condition. |
+| `onMaxReached` | `"fail" \| "return-last"` | `"return-last"` | Behavior when `maxIterations` is reached without the `until` condition becoming `true`. `"fail"` causes the workflow to fail. `"return-last"` uses the output from the final iteration and continues. |
+| `skipIf` | `boolean` | `false` | When `true`, the loop and all its children are skipped. The component returns `null`. |
+| `children` | `ReactNode` | `undefined` | The tasks and control-flow components to execute on each iteration. |
+
+## Basic usage
+
+```tsx
+<Workflow name="review-loop">
+  <Ralph
+    until={ctx.output(schema.review, { nodeId: "review" }).approved}
+    maxIterations={3}
+    onMaxReached="return-last"
+  >
+    <Task id="review" output={schema.review} agent={reviewAgent}>
+      Review the code and decide whether to approve.
+    </Task>
+  </Ralph>
+</Workflow>
+```
+
+The `review` task runs up to 3 times. If the agent sets `approved: true` in its output, the loop stops early. If all 3 iterations complete without approval, the last output is used and the workflow continues.
+
+## How iteration works
+
+Each time Ralph loops, it increments an internal iteration counter. This counter is reflected in two places on the workflow context:
+
+- **`ctx.iteration`** -- the current iteration number (0-indexed) for the active loop.
+- **`ctx.iterations`** -- a map of Ralph ids to their current iteration numbers, useful when you need to reference iteration counts from outside the loop.
+
+Inside the loop body, tasks receive the current iteration number in their task descriptor. Output tables for tasks inside a `<Ralph>` should include an `iteration` column to store per-iteration results:
+
+```tsx
+const reviewTable = sqliteTable(
+  "review",
+  {
+    runId: text("run_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    iteration: integer("iteration").notNull().default(0),
+    approved: integer("approved", { mode: "boolean" }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
+  }),
+);
+```
+
+Note the `iteration` column in the primary key. This ensures each iteration's output is stored as a separate row.
+
+## Accessing iteration count
+
+Use `ctx.iterationCount()` to check how many iterations have completed for a given task:
+
+```tsx
+<Ralph
+  until={ctx.iterationCount(schema.review, "review") >= 2}
+  maxIterations={5}
+>
+  <Task id="review" output={schema.review} agent={reviewAgent}>
+    {`This is iteration ${ctx.iteration}. Review the code.`}
+  </Task>
+</Ralph>
+```
+
+## Multiple loops
+
+Use the `id` prop to distinguish between multiple `<Ralph>` loops in the same workflow:
+
+```tsx
+<Workflow name="multi-loop">
+  <Ralph id="code-loop" until={codeApproved} maxIterations={3}>
+    <Task id="write-code" output="writeCode" agent={codeAgent}>
+      Write the implementation.
+    </Task>
+  </Ralph>
+  <Ralph id="review-loop" until={reviewApproved} maxIterations={3}>
+    <Task id="review-code" output="reviewCode" agent={reviewAgent}>
+      Review the implementation.
+    </Task>
+  </Ralph>
+</Workflow>
+```
+
+When `id` is omitted, Smithers generates a stable id from the element's position in the JSX tree.
+
+## onMaxReached behavior
+
+| Value | Behavior |
+| --- | --- |
+| `"return-last"` | The loop stops, the output from the final iteration is kept, and the workflow continues to the next node. This is the default. |
+| `"fail"` | The loop stops and the workflow fails with an error indicating the maximum iteration limit was reached. |
+
+```tsx
+// Fail the workflow if we can't converge in 10 iterations
+<Ralph until={converged} maxIterations={10} onMaxReached="fail">
+  <Task id="optimize" output="optimize" agent={optimizer}>
+    Optimize the solution.
+  </Task>
+</Ralph>
+```
+
+## Full example
+
+```tsx
+import { smithers, Workflow, Task, Ralph } from "smithers";
+import { agent } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+
+const inputTable = sqliteTable("input", {
+  runId: text("run_id").primaryKey(),
+  code: text("code").notNull(),
+});
+
+const reviewTable = sqliteTable(
+  "review",
+  {
+    runId: text("run_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    iteration: integer("iteration").notNull().default(0),
+    approved: integer("approved", { mode: "boolean" }).notNull(),
+    feedback: text("feedback"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
+  }),
+);
+
+const schema = { input: inputTable, output: reviewTable, review: reviewTable };
+const db = drizzle("./workflow.db", { schema });
+
+const reviewAgent = agent({
+  model: anthropic("claude-sonnet-4-20250514"),
+  system: "You are a thorough code reviewer.",
+});
+
+export default smithers(db, (ctx) => (
+  <Workflow name="iterative-review">
+    <Ralph
+      until={
+        ctx.outputMaybe(schema.review, { nodeId: "review" })?.approved === true
+      }
+      maxIterations={5}
+      onMaxReached="return-last"
+    >
+      <Task id="review" output={schema.review} agent={reviewAgent}>
+        {`Review this code and either approve or provide feedback:\n\n${ctx.input.code}`}
+      </Task>
+    </Ralph>
+  </Workflow>
+));
+```
+
+## Rendering
+
+Internally, `<Ralph>` renders as a `<smithers:ralph>` host element (or `null` when skipped). The runtime manages iteration state and re-renders the workflow tree on each iteration, re-evaluating the `until` condition with the latest context.
+
+## Restrictions
+
+- **Nesting is not supported.** Placing a `<Ralph>` inside another `<Ralph>` throws the error `"Nested <Ralph> is not supported."` at render time.
+- **Duplicate ids throw.** If two `<Ralph>` loops share the same `id` (explicit or auto-generated), the error `"Duplicate Ralph id detected: <id>"` is thrown.
+
+## Notes
+
+- The `until` condition is evaluated at render time for each frame. It typically references the output of a task inside the loop body using `ctx.output()` or `ctx.outputMaybe()`.
+- Use `ctx.outputMaybe()` for the `until` condition since the output will not exist on the first render before the task has run.
+- Tasks inside a `<Ralph>` loop should have an `iteration` column in their output table's primary key to avoid row conflicts across iterations.
+- Ralph tracks iteration state internally. The iteration counter resets to 0 at the start of each workflow run.
