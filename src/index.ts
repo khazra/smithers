@@ -5,7 +5,9 @@ import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
 import { runWorkflow as runWorkflowEngine, renderFrame as renderFrameEngine } from "./engine";
 import { createSmithersContext } from "./context";
-import { Workflow as BaseWorkflow } from "./components";
+import { Workflow as BaseWorkflow, Task as BaseTask } from "./components";
+import type { TaskProps } from "./types";
+import { getTableName } from "drizzle-orm";
 import { zodToTable, zodToCreateTableSQL, camelToSnake } from "./zod-to-table";
 import type { z } from "zod";
 
@@ -176,7 +178,16 @@ function createSmithersFromSchemas<
     schemaRegistry.set(name, { table: tables[name], zodSchema });
   }
 
-  // 6. Context + hooks
+  // 6. Build reverse lookup: Drizzle table name → Zod schema
+  const tableNameToZodSchema = new Map<string, z.ZodObject<any>>();
+  for (const [name, zodSchema] of Object.entries(schemas)) {
+    const tableName = camelToSnake(name);
+    tableNameToZodSchema.set(tableName, zodSchema);
+    // Also map the original key name for string-keyed outputs
+    tableNameToZodSchema.set(name, zodSchema);
+  }
+
+  // 7. Context + hooks
   const { SmithersContext, useCtx } = createSmithersContext<any>();
   const ctxRef = { current: null as SmithersCtx<any> | null };
 
@@ -186,6 +197,31 @@ function createSmithersFromSchemas<
       { value: ctxRef.current },
       React.createElement(BaseWorkflow, props, props.children)
     );
+  }
+
+  /**
+   * Task wrapper that auto-injects outputSchema from the schema registry
+   * when output is a Drizzle table or string key and outputSchema is not
+   * explicitly provided.
+   */
+  function Task<Row>(props: TaskProps<Row>) {
+    if (!props.outputSchema && props.output) {
+      let tableName: string | undefined;
+      if (typeof props.output === "string") {
+        tableName = props.output;
+      } else {
+        try {
+          tableName = getTableName(props.output as any);
+        } catch {}
+      }
+      if (tableName) {
+        const zodSchema = tableNameToZodSchema.get(tableName);
+        if (zodSchema) {
+          return React.createElement(BaseTask, { ...props, outputSchema: zodSchema } as any);
+        }
+      }
+    }
+    return React.createElement(BaseTask, props as any);
   }
 
   function boundSmithers(
@@ -205,6 +241,7 @@ function createSmithersFromSchemas<
 
   return {
     Workflow,
+    Task,
     useCtx,
     smithers: boundSmithers,
     db,

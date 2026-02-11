@@ -24,7 +24,7 @@ import { platform } from "node:os";
 
 const DEFAULT_MAX_CONCURRENCY = 4;
 const STALE_ATTEMPT_MS = 15 * 60 * 1000;
-const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+const DEFAULT_TOOL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — agents need time for builds/tests
 const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 
 /** Prevent macOS idle sleep while a workflow is running. No-op on other platforms. */

@@ -123,7 +123,10 @@ export class SmithersDb {
   }
 
   async insertFrame(row: any) {
-    await this.db.insert(smithersFrames).values(row);
+    await this.db.insert(smithersFrames).values(row).onConflictDoUpdate({
+      target: [smithersFrames.runId, smithersFrames.frameNo],
+      set: row,
+    });
   }
 
   async getLastFrame(runId: string) {
