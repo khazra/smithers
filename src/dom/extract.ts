@@ -101,12 +101,22 @@ export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): E
       }
       seen.add(nodeId);
 
-      const outputTable = raw.output;
-      if (!outputTable) {
+      const outputRaw = raw.output;
+      if (!outputRaw) {
         throw new Error(`Task ${nodeId} is missing output table.`);
       }
 
-      const outputTableName = getTableName(outputTable as any);
+      // Support both Drizzle table objects and string keys
+      let outputTable: any;
+      let outputTableName: string;
+      if (typeof outputRaw === "string") {
+        // String key — will be resolved by the engine via schemaRegistry
+        outputTable = null;
+        outputTableName = outputRaw;
+      } else {
+        outputTable = outputRaw;
+        outputTableName = getTableName(outputRaw as any);
+      }
       const needsApproval = Boolean(raw.needsApproval);
       const skipIf = Boolean(raw.skipIf);
       const retries = typeof raw.retries === "number" ? raw.retries : 0;
