@@ -17,7 +17,6 @@
     "./mdx-plugin": "./src/mdx-plugin.ts"
   },
   "workspaces": [
-    "apps/*",
     "packages/*"
   ],
   "scripts": {
