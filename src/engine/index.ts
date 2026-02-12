@@ -702,7 +702,7 @@ async function executeTask(
             const retryResult = await desc.agent.generate({
               options: undefined as any,
               prompt: jsonPrompt,
-              timeout: { totalMs: 60000 },
+              timeout: { totalMs: Math.max(desc.timeoutMs ?? 300000, 300000) },
             });
             const retryText = (retryResult as any).text ?? "";
             try {
@@ -792,7 +792,7 @@ async function executeTask(
         const schemaRetryResult = await (desc.agent as any).generate({
           options: undefined as any,
           prompt: schemaRetryPrompt,
-          timeout: { totalMs: 60000 },
+          timeout: { totalMs: Math.max(desc.timeoutMs ?? 300000, 300000) },
         });
         const retryText = ((schemaRetryResult as any).text ?? "").trim();
 
