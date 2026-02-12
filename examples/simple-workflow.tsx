@@ -62,7 +62,8 @@ const writerAgent = new Agent({
 });
 
 // Export workflow
-export default smithers(db, (ctx) => (
+// TODO: Properly type ctx once smithers() infers SmithersCtx<Schema>; using any here for now.
+export default smithers(db, (ctx: any) => (
   <Workflow name="simple-example">
     <Sequence>
       <Task id="research" output={schema.research} agent={researchAgent}>
