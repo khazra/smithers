@@ -55,7 +55,7 @@ import { MergeQueue } from "smithers";
 
 ## Rendering
 
-Internally, `<MergeQueue>` renders as a `<smithers:merge-queue>` host element (or `null` when skipped). Each child task inside the queue receives `parallelGroupId` and `parallelMaxConcurrency` in its task descriptor. The scheduler enforces that no more than `parallelMaxConcurrency` tasks sharing the same `parallelGroupId` run at once.
+Internally, `<MergeQueue>` renders as a `<smithers:merge-queue>` host element (or `null` when skipped). Each child task inside the queue receives `parallelGroupId` and `parallelMaxConcurrency` in its task descriptor. The engine enforces that no more than `parallelMaxConcurrency` tasks sharing the same `parallelGroupId` run at once.
 
 ## Notes
 

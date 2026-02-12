@@ -2,7 +2,10 @@ import type { XmlNode, XmlElement, TaskDescriptor } from "../types";
 import { getTableName } from "drizzle-orm";
 import { resolveStableId } from "../utils/tree-ids";
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import * as C from "../constants";
+import {
+  DEFAULT_MERGE_QUEUE_CONCURRENCY,
+  WORKTREE_EMPTY_PATH_ERROR,
+} from "../constants";
 
 export type HostNode = HostElement | HostText;
 
@@ -82,11 +85,12 @@ export function extractFromHost(
     stack: { id: string; max?: number }[],
   ) {
     const id = resolveStableId(raw?.id, tag, path);
-    const rawMax =
-      typeof raw?.maxConcurrency === "number" ? raw.maxConcurrency : undefined;
+    // Coerce numeric strings (e.g. from MDX) in line with scheduler.parseNum
+    const n = Number(raw?.maxConcurrency);
+    const rawMax = Number.isFinite(n) ? n : undefined;
     const max =
       tag === "merge-queue"
-        ? rawMax ?? C.DEFAULT_MERGE_QUEUE_CONCURRENCY
+        ? rawMax ?? DEFAULT_MERGE_QUEUE_CONCURRENCY
         : rawMax;
     return [...stack, { id, max }];
   }
@@ -153,7 +157,7 @@ export function extractFromHost(
       seenWorktree.add(id);
       let pathVal = String(node.rawProps?.path ?? "").trim();
       if (!pathVal) {
-        throw new Error(C.WORKTREE_EMPTY_PATH_ERROR);
+        throw new Error(WORKTREE_EMPTY_PATH_ERROR);
       }
       const baseRoot = opts?.baseRootDir;
       const base =

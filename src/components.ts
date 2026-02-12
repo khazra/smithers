@@ -84,7 +84,7 @@ export function Parallel(props: ParallelProps) {
   // Align prop sanitization with other structural components
   const next: { maxConcurrency?: number; id?: string } = {
     maxConcurrency: props.maxConcurrency,
-    id: (props as any).id,
+    id: props.id,
   };
   return React.createElement("smithers:parallel", next, props.children);
 }
