@@ -22,14 +22,7 @@ export type TaskDescriptor = {
   iteration: number;
   ralphId?: string;
 
-  /**
-   * Worktree/merge-queue metadata
-   *
-   * When tasks are nested under a <Worktree> or managed by a <MergeQueue>,
-   * they may need to execute in an alternate repository root. These optional
-   * fields allow the engine/scheduler to route execution accordingly without
-   * changing existing call sites.
-   */
+  /** Worktree/MergeQueue context (set when task is inside <Worktree>). */
   worktreeId?: string;
   worktreePath?: string;
   /** Optional per-task root override (absolute path). */
@@ -345,7 +338,7 @@ export type RalphProps = {
  * Execute a subtree of tasks in a separate worktree rooted at `path`.
  *
  * - `id` provides stable identification for state tracking and scheduling.
- * - `baseRev` optionally selects the JJ/Git revision to base the worktree from.
+ * - `baseRev` optionally selects the JJ (Jujutsu) revision to base the worktree from.
  */
 export type WorktreeProps = {
   id?: string;
@@ -363,7 +356,6 @@ export type MergeQueueProps = {
   skipIf?: boolean;
   children?: React.ReactNode;
 };
-
 
 export type SmithersError = {
   code: string;
