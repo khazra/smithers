@@ -22,6 +22,19 @@ export type TaskDescriptor = {
   iteration: number;
   ralphId?: string;
 
+  /**
+   * Worktree/merge-queue metadata
+   *
+   * When tasks are nested under a <Worktree> or managed by a <MergeQueue>,
+   * they may need to execute in an alternate repository root. These optional
+   * fields allow the engine/scheduler to route execution accordingly without
+   * changing existing call sites.
+   */
+  worktreeId?: string;
+  worktreePath?: string;
+  /** Optional per-task root override (absolute path). */
+  rootDirOverride?: string;
+
   outputTable: Table | null;
   outputTableName: string;
   outputSchema?: import("zod").ZodObject<any>; // Optional Zod schema for agent output
@@ -327,6 +340,30 @@ export type RalphProps = {
   skipIf?: boolean;
   children?: React.ReactNode;
 };
+
+/**
+ * Execute a subtree of tasks in a separate worktree rooted at `path`.
+ *
+ * - `id` provides stable identification for state tracking and scheduling.
+ * - `baseRev` optionally selects the JJ/Git revision to base the worktree from.
+ */
+export type WorktreeProps = {
+  id?: string;
+  path: string;
+  baseRev?: string;
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
+/**
+ * Group of concurrent worktrees participating in a merge queue.
+ */
+export type MergeQueueProps = {
+  maxWorktrees?: number;
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
 
 export type SmithersError = {
   code: string;
