@@ -523,8 +523,22 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
       await commandSpec.cleanup();
     }
 
+    function filterBenignStderr(stderr: string): string {
+      const benignPatterns = [
+        /^.*state db missing rollout path.*$/gm,
+        /^.*codex_core::rollout::list.*$/gm,
+      ];
+      let filtered = stderr;
+      for (const pattern of benignPatterns) {
+        filtered = filtered.replace(pattern, "");
+      }
+      // Clean up extra blank lines
+      return filtered.replace(/\n{3,}/g, "\n\n").trim();
+    }
+
     if (result.exitCode && result.exitCode !== 0) {
-      const errorText = result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`;
+      const filteredStderr = filterBenignStderr(result.stderr);
+      const errorText = filteredStderr || result.stdout.trim() || `CLI exited with code ${result.exitCode}`;
       throw new Error(errorText);
     }
 
@@ -724,6 +738,21 @@ export class CodexAgent extends BaseCliAgent {
     pushFlag(args, "--color", this.opts.color);
     if (this.opts.json) args.push("--json");
 
+    // Auto-wire output schema from task context if not explicitly set
+    let schemaCleanupFile: string | null = null;
+    if (!this.opts.outputSchema && params.options?.outputSchema) {
+      try {
+        const { zodToJsonSchema } = await import("zod-to-json-schema");
+        const jsonSchema = zodToJsonSchema(params.options.outputSchema);
+        const schemaFile = join(tmpdir(), `smithers-schema-${randomUUID()}.json`);
+        await fs.writeFile(schemaFile, JSON.stringify(jsonSchema), "utf8");
+        pushFlag(args, "--output-schema", schemaFile);
+        schemaCleanupFile = schemaFile;
+      } catch {
+        // zod-to-json-schema not available or conversion failed, skip auto-wiring
+      }
+    }
+
     const outputFile =
       this.opts.outputLastMessage ?? join(tmpdir(), `smithers-codex-${randomUUID()}.txt`);
     pushFlag(args, "--output-last-message", outputFile);
@@ -743,6 +772,9 @@ export class CodexAgent extends BaseCliAgent {
       cleanup: async () => {
         if (!this.opts.outputLastMessage) {
           await fs.rm(outputFile, { force: true }).catch(() => undefined);
+        }
+        if (schemaCleanupFile) {
+          await fs.rm(schemaCleanupFile, { force: true }).catch(() => undefined);
         }
       },
     };

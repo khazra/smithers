@@ -18,11 +18,24 @@ export async function loadOutputs(db: any, schema: Record<string, any>, runId: s
   for (const [key, table] of Object.entries(schema)) {
     if (!table || typeof table !== "object") continue;
     if (key === "input") continue;
-    const cols = getTableColumns(table as any) as Record<string, any>;
+    let cols: Record<string, any>;
+    try {
+      cols = getTableColumns(table as any) as Record<string, any>;
+    } catch {
+      // Skip non-table entries (e.g. Drizzle relations/metadata)
+      continue;
+    }
     const runIdCol = cols.runId;
     if (!runIdCol) continue;
+    let tableName: string;
+    try {
+      tableName = getTableName(table as any);
+    } catch {
+      // Skip entries that are not valid Drizzle tables
+      continue;
+    }
     const rows = await db.select().from(table as any).where(eq(runIdCol, runId));
-    out[getTableName(table as any)] = rows;
+    out[tableName] = rows;
     out[key] = rows;
   }
   return out;

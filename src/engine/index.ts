@@ -83,7 +83,7 @@ function assertInputObject(input: unknown) {
   }
 }
 
-function resolveSchema(db: any): Record<string, any> {
+export function resolveSchema(db: any): Record<string, any> {
   const candidates = [db?._?.fullSchema, db?._?.schema, db?.schema];
   let schema: Record<string, any> = {};
   for (const candidate of candidates) {
@@ -109,8 +109,10 @@ function resolveSchema(db: any): Record<string, any> {
         const name = getTableName(table as any);
         if (name.startsWith("_smithers")) continue;
       } catch {
-        // ignore name lookup issues
+        continue; // Skip non-table entries (e.g. Drizzle relations/metadata)
       }
+    } else {
+      continue; // Skip non-object entries
     }
     filtered[key] = table;
   }
@@ -549,6 +551,7 @@ async function executeTask(
               timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
               onStdout: (text: string) => emitOutput(text, "stdout"),
               onStderr: (text: string) => emitOutput(text, "stderr"),
+              outputSchema: desc.outputSchema,
             });
           },
         );
@@ -1015,6 +1018,28 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
     await eventBus.emitEventWithPersist({ type: "RunStarted", runId, timestampMs: nowMs() });
 
     await cancelStaleAttempts(adapter, runId);
+
+    if (opts.resume) {
+      // On resume, cancel ALL in-progress attempts since the previous process is dead
+      const staleInProgress = await adapter.listInProgressAttempts(runId);
+      const now = nowMs();
+      for (const attempt of staleInProgress) {
+        await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+          state: "cancelled",
+          finishedAtMs: now,
+        });
+        await adapter.insertNode({
+          runId,
+          nodeId: attempt.nodeId,
+          iteration: attempt.iteration,
+          state: "pending",
+          lastAttempt: attempt.attempt,
+          updatedAtMs: now,
+          outputTable: "",
+          label: null,
+        });
+      }
+    }
 
     const renderer = new SmithersRenderer();
     let frameNo = (await adapter.getLastFrame(runId))?.frameNo ?? 0;

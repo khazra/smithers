@@ -2,7 +2,7 @@
 import { resolve, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
-import { runWorkflow, renderFrame } from "../engine";
+import { runWorkflow, renderFrame, resolveSchema } from "../engine";
 import { approveNode, denyNode } from "../engine/approvals";
 import { SmithersDb } from "../db/adapter";
 import { ensureSmithersTables } from "../db/ensure";
@@ -83,10 +83,11 @@ Commands:
   approve <workflow.tsx> --run-id ID --node-id ID [--iteration N] [--note TEXT] [--decided-by TEXT]
   deny <workflow.tsx> --run-id ID --node-id ID [--iteration N] [--note TEXT] [--decided-by TEXT]
   status <workflow.tsx> --run-id ID
-  frames <workflow.tsx> --run-id ID [--tail N]
+  frames <workflow.tsx> --run-id ID [--tail N] [--compact]
   list <workflow.tsx> [--limit N] [--status STATUS]
   graph <workflow.tsx> [--run-id ID] [--input JSON]
   revert <workflow.tsx> --run-id ID --node-id ID [--attempt N] [--iteration N]
+  cancel <workflow.tsx> --run-id ID
 
 Run options:
   --root PATH            Root directory for tool sandbox (default: workflow dir)
@@ -122,6 +123,17 @@ Run options:
       process.exit(4);
     }
     const adapter = new SmithersDb(workflow.db as any);
+    // Warn about stale runs when starting a new run
+    if (!resume) {
+      const staleRuns = await adapter.listRuns(10, "running");
+      if (staleRuns.length > 0) {
+        process.stderr.write(`⚠ Found ${staleRuns.length} run(s) still marked as 'running':\n`);
+        for (const r of staleRuns as any[]) {
+          process.stderr.write(`  ${r.runId} (started ${new Date(r.startedAtMs ?? r.createdAtMs).toISOString()})\n`);
+        }
+        process.stderr.write(`  Use 'smithers cancel' to mark them as cancelled, or 'smithers resume' to continue.\n`);
+      }
+    }
     if (runId) {
       const existing = await adapter.getRun(runId);
       if (resume && !existing) {
@@ -144,6 +156,41 @@ Run options:
     const toolTimeoutMs = args["tool-timeout-ms"] !== undefined
       ? parseIntegerOrExit(args["tool-timeout-ms"], "tool-timeout-ms", 1)
       : undefined;
+    const startTime = Date.now();
+    const formatElapsed = () => {
+      const elapsed = Date.now() - startTime;
+      const secs = Math.floor(elapsed / 1000);
+      const mins = Math.floor(secs / 60);
+      const hrs = Math.floor(mins / 60);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${pad(hrs)}:${pad(mins % 60)}:${pad(secs % 60)}`;
+    };
+    const onProgress = (event: any) => {
+      const ts = formatElapsed();
+      switch (event.type) {
+        case "NodeStarted":
+          process.stderr.write(`[${ts}] → ${event.nodeId} (attempt ${event.attempt ?? 1}, iteration ${event.iteration ?? 0})\n`);
+          break;
+        case "NodeFinished":
+          process.stderr.write(`[${ts}] ✓ ${event.nodeId} (attempt ${event.attempt ?? 1})\n`);
+          break;
+        case "NodeFailed":
+          process.stderr.write(`[${ts}] ✗ ${event.nodeId} (attempt ${event.attempt ?? 1}): ${typeof event.error === "string" ? event.error : event.error?.message ?? "failed"}\n`);
+          break;
+        case "NodeRetrying":
+          process.stderr.write(`[${ts}] ↻ ${event.nodeId} retrying (attempt ${event.attempt ?? 1})\n`);
+          break;
+        case "RunFinished":
+          process.stderr.write(`[${ts}] ✓ Run finished\n`);
+          break;
+        case "RunFailed":
+          process.stderr.write(`[${ts}] ✗ Run failed: ${typeof event.error === "string" ? event.error : event.error?.message ?? "unknown"}\n`);
+          break;
+        case "FrameCommitted":
+          // Don't print frame commits - too noisy
+          break;
+      }
+    };
     const result = await runWorkflow(workflow, {
       input,
       runId,
@@ -155,6 +202,7 @@ Run options:
       allowNetwork: Boolean(args["allow-network"]),
       maxOutputBytes,
       toolTimeoutMs,
+      onProgress,
     });
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.status === "finished" ? 0 : result.status === "waiting-approval" ? 3 : result.status === "cancelled" ? 2 : 1);
@@ -214,7 +262,30 @@ Run options:
     const adapter = new SmithersDb(workflow.db as any);
     const tail = args.tail !== undefined ? parseIntegerOrExit(args.tail, "tail", 1) : 20;
     const frames = await adapter.listFrames(runId, tail);
-    console.log(JSON.stringify(frames, null, 2));
+    if (args.compact) {
+      const compact = frames.map((frame: any) => {
+        const result: Record<string, any> = {
+          frameNo: frame.frameNo,
+          createdAtMs: frame.createdAtMs,
+        };
+        // Parse taskIndex for node statuses
+        if (frame.taskIndexJson) {
+          try {
+            result.tasks = JSON.parse(frame.taskIndexJson);
+          } catch {}
+        }
+        // Include mounted task IDs
+        if (frame.mountedTaskIdsJson) {
+          try {
+            result.mountedTaskIds = JSON.parse(frame.mountedTaskIdsJson);
+          } catch {}
+        }
+        return result;
+      });
+      console.log(JSON.stringify(compact, null, 2));
+    } else {
+      console.log(JSON.stringify(frames, null, 2));
+    }
     process.exit(0);
   }
 
@@ -243,7 +314,7 @@ Run options:
     const workflow = await loadWorkflow(workflowPath);
     ensureSmithersTables(workflow.db as any);
     const runId = args["run-id"] ?? "graph";
-    const schema = (workflow.db as any)?._?.schema ?? (workflow.db as any)?.schema ?? {};
+    const schema = resolveSchema(workflow.db);
     const inputTable = schema.input;
     const inputRow = args.input
       ? parseJsonOrExit(args.input, "input")
@@ -283,6 +354,40 @@ Run options:
     });
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.success ? 0 : 1);
+  }
+
+  if (cmd === "cancel") {
+    const workflowPath = args._[0];
+    const runId = args["run-id"];
+    if (!workflowPath || !runId) {
+      console.error("Missing workflow path or --run-id");
+      process.exit(4);
+    }
+    const workflow = await loadWorkflow(workflowPath);
+    ensureSmithersTables(workflow.db as any);
+    const adapter = new SmithersDb(workflow.db as any);
+    const run = await adapter.getRun(runId);
+    if (!run) {
+      console.error(`Run not found: ${runId}`);
+      process.exit(4);
+    }
+    if (run.status !== "running" && run.status !== "waiting-approval") {
+      console.error(`Run is not active (status: ${run.status})`);
+      process.exit(4);
+    }
+    // Cancel all in-progress attempts
+    const inProgress = await adapter.listInProgressAttempts(runId);
+    const now = Date.now();
+    for (const attempt of inProgress) {
+      await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+        state: "cancelled",
+        finishedAtMs: now,
+      });
+    }
+    // Mark run as cancelled
+    await adapter.updateRun(runId, { status: "cancelled", finishedAtMs: now });
+    console.log(JSON.stringify({ runId, status: "cancelled", cancelledAttempts: inProgress.length }, null, 2));
+    process.exit(2);
   }
 
   console.error(`Unknown command: ${cmd}`);

@@ -47,7 +47,7 @@ function runWorkflow<Schema>(
 | `runId` | `string` | Auto-generated | Provide a deterministic run ID. If omitted, a new unique ID is generated. |
 | `resume` | `boolean` | `false` | Resume an existing run instead of starting a new one. Requires `runId`. Skips already-completed tasks and picks up from the last checkpoint. |
 | `maxConcurrency` | `number` | `4` | Maximum number of tasks that can execute in parallel at any given time. Also respects per-group limits set by `<Parallel maxConcurrency>`. |
-| `onProgress` | `(e: SmithersEvent) => void` | `undefined` | Callback invoked for every lifecycle event. See [Events](/docs/runtime/events). |
+| `onProgress` | `(e: SmithersEvent) => void` | `undefined` | Callback invoked for every lifecycle event. See [Events](/runtime/events). |
 | `signal` | `AbortSignal` | `undefined` | Standard `AbortSignal` to cancel the run. When aborted, the run finishes with status `"cancelled"`. |
 | `workflowPath` | `string` | `undefined` | Absolute or relative path to the workflow `.tsx` file. Used to resolve the default `rootDir` and stored in the run metadata. |
 | `rootDir` | `string` | Workflow file's directory | Root directory for the tool sandbox. All file-system tools (`read`, `edit`, `write`, `bash`, `grep`) are confined to this directory. |
@@ -149,7 +149,7 @@ const result = await runWorkflow(workflow, {
 });
 ```
 
-See [Events](/docs/runtime/events) for the full list of event types and their fields.
+See [Events](/runtime/events) for the full list of event types and their fields.
 
 ## Idle Sleep Prevention
 
@@ -163,7 +163,7 @@ Set `SMITHERS_DEBUG=1` in your environment to print engine-level errors to stder
 
 ## Related
 
-- [Events](/docs/runtime/events) -- All event types emitted during a run.
-- [renderFrame](/docs/runtime/render-frame) -- Preview the workflow graph without executing.
-- [CLI](/docs/cli/overview) -- Run workflows from the command line.
-- [Resumability](/docs/guides/resumability) -- How durable state and crash recovery work.
+- [Events](/runtime/events) -- All event types emitted during a run.
+- [renderFrame](/runtime/render-frame) -- Preview the workflow graph without executing.
+- [CLI](/cli/overview) -- Run workflows from the command line.
+- [Resumability](/guides/resumability) -- How durable state and crash recovery work.

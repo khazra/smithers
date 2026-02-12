@@ -19,7 +19,7 @@ Every workflow run follows the same four-phase cycle, repeated until no runnable
 
 ### Phase 1: Render
 
-Smithers calls your builder function with the current `SmithersCtx`, which contains the run's input and all outputs produced so far. The JSX you return is rendered through a [custom React reconciler](/docs/concepts/renderer-internals) -- not React DOM -- producing an in-memory `HostElement` tree.
+Smithers calls your builder function with the current `SmithersCtx`, which contains the run's input and all outputs produced so far. The JSX you return is rendered through a [custom React reconciler](/concepts/renderer-internals) -- not React DOM -- producing an in-memory `HostElement` tree.
 
 The `extractFromHost` function then walks this tree depth-first, left-to-right and produces two outputs:
 

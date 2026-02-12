@@ -1,0 +1,160 @@
+# Smithers
+
+> Deterministic, resumable AI workflow orchestration using JSX.
+
+Smithers is a TypeScript framework for building deterministic, resumable AI workflows using JSX. You define your workflow as a tree of React components, and Smithers handles execution ordering, durable state persistence in SQLite, structured output validation, and crash recovery.
+
+- Package: `smithers-orchestrator` on npm
+- Runtime: Bun >= 1.3 (uses Bun's native SQLite driver)
+- Language: TypeScript with JSX
+- AI SDK: Vercel AI SDK (`ai` package) for agent abstraction
+
+## Full Documentation
+
+For the complete documentation with all code examples, API references, and guides, see:
+- [llms-full.txt](https://smithers.sh/llms-full.txt): Complete inline documentation (~76k tokens)
+
+## Quick Start
+
+```bash
+bun add smithers-orchestrator ai @ai-sdk/anthropic zod
+```
+
+```tsx
+import { createSmithers, Task, runWorkflow } from "smithers-orchestrator";
+import { ToolLoopAgent as Agent } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { z } from "zod";
+
+const { Workflow, smithers } = createSmithers({
+  analysis: z.object({ summary: z.string(), severity: z.enum(["low", "medium", "high"]) }),
+  fix:      z.object({ patch: z.string(), explanation: z.string() }),
+});
+
+const analyst = new Agent({
+  model: anthropic("claude-sonnet-4-20250514"),
+  instructions: "You are a code analyst. Return structured JSON.",
+});
+
+const fixer = new Agent({
+  model: anthropic("claude-sonnet-4-20250514"),
+  instructions: "You are a senior engineer who writes minimal, correct fixes.",
+});
+
+export default smithers((ctx) => (
+  <Workflow name="bugfix">
+    <Task id="analyze" output="analysis" agent={analyst}>
+      {`Analyze this bug: ${ctx.input.description}`}
+    </Task>
+    <Task id="fix" output="fix" agent={fixer}>
+      {`Fix this issue: ${ctx.output("analysis", { nodeId: "analyze" }).summary}`}
+    </Task>
+  </Workflow>
+));
+```
+
+```bash
+bunx smithers run workflow.tsx --input '{"description": "Auth tokens expire silently"}'
+```
+
+## Core Concepts
+
+- **Workflow**: JSX tree defining the execution graph. Re-renders after each task completes.
+- **Task**: Single unit of work (AI agent call or static data). Identified by `id` prop.
+- **Sequence**: Tasks run top-to-bottom. Default behavior inside `<Workflow>`.
+- **Parallel**: Tasks run concurrently with optional `maxConcurrency`.
+- **Branch**: Conditional execution based on a boolean (`if`/`then`/`else`).
+- **Ralph**: Iterative loop with `until` condition and `maxIterations` safety cap.
+- **Context (`ctx`)**: Access `input`, completed `output` rows, `runId`, `iteration`.
+- **Resume**: Re-running with same `runId` skips completed tasks automatically.
+- **Schema Registry**: Zod schemas passed to `createSmithers()` auto-create SQLite tables.
+
+## Key Exports
+
+```ts
+// Core
+import { createSmithers, Task, Sequence, Parallel, Branch, Ralph, runWorkflow, renderFrame } from "smithers-orchestrator";
+
+// Tools (sandboxed filesystem + shell)
+import { read, write, edit, grep, bash, tools } from "smithers-orchestrator/tools";
+
+// CLI Agents
+import { ClaudeCodeAgent, CodexAgent, GeminiAgent } from "smithers-orchestrator/agents/cli";
+
+// HTTP Server
+import { startServer } from "smithers-orchestrator/server";
+
+// PI Plugin (HTTP client)
+import { runWorkflow, resume, approve, deny, streamEvents, getStatus } from "smithers-orchestrator/pi-plugin";
+```
+
+## TSConfig
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "smithers-orchestrator"
+  }
+}
+```
+
+## Docs
+
+### Getting Started
+- [Introduction](https://smithers.sh/introduction): Overview, architecture, and how the render-execute-persist loop works.
+- [Installation](https://smithers.sh/installation): Install Smithers, configure TypeScript, verify setup.
+- [Quickstart](https://smithers.sh/quickstart): Build a two-step research workflow in 5 minutes.
+
+### Core Concepts
+- [Execution Model](https://smithers.sh/concepts/execution-model): The four-phase render-schedule-execute-persist loop, node states, deterministic ordering.
+- [Data Model](https://smithers.sh/concepts/data-model): Schema-driven vs manual API, SQLite tables, output validation, internal tables.
+- [Context API](https://smithers.sh/concepts/context): `SmithersCtx` interface -- `output()`, `outputMaybe()`, `latest()`, `latestArray()`, `iterationCount()`.
+- [Approvals](https://smithers.sh/concepts/approvals): Human-in-the-loop gates with `needsApproval`, CLI approve/deny, events.
+- [Caching](https://smithers.sh/concepts/caching): Content-addressed cache with SHA-256 keys, automatic invalidation on schema/prompt/model changes.
+- [Renderer Internals](https://smithers.sh/concepts/renderer-internals): Custom React reconciler pipeline from JSX to TaskDescriptor[] and XML snapshots.
+
+### Components
+- [Workflow](https://smithers.sh/components/workflow): Root container with implicit sequencing and optional caching.
+- [Task](https://smithers.sh/components/task): Agent mode (prompt -> AI -> structured output) or static mode (direct data).
+- [Sequence](https://smithers.sh/components/sequence): Sequential execution of children.
+- [Parallel](https://smithers.sh/components/parallel): Concurrent execution with optional `maxConcurrency`.
+- [Branch](https://smithers.sh/components/branch): Conditional `if`/`then`/`else` routing.
+- [Ralph](https://smithers.sh/components/ralph): Iterative loop with `until`, `maxIterations`, `onMaxReached`.
+
+### Guides
+- [Tutorial: Build a Workflow](https://smithers.sh/guides/tutorial-workflow): End-to-end three-step code review workflow.
+- [Structured Output](https://smithers.sh/guides/structured-output): Schema validation flow, auto-retry, outputSchema prop.
+- [Error Handling](https://smithers.sh/guides/error-handling): Retries, timeouts, continueOnFail, skipIf, Branch fallbacks.
+- [Workflow Patterns](https://smithers.sh/guides/patterns): Project structure, schema organization, MDX prompts, naming conventions.
+- [Resumability](https://smithers.sh/guides/resumability): Crash recovery, stale attempt cleanup, deterministic node IDs.
+- [Debugging](https://smithers.sh/guides/debugging): CLI inspection, NDJSON logs, SQLite queries.
+- [Monitoring & Logs](https://smithers.sh/guides/monitoring-logs): onProgress callback, NDJSON files, SSE streaming, event types.
+- [Best Practices](https://smithers.sh/guides/best-practices): Big coherent tasks, measurable stop conditions, structured reports.
+- [VCS Integration](https://smithers.sh/guides/vcs): JJ (Jujutsu) snapshots for filesystem revert support.
+
+### Runtime API
+- [runWorkflow](https://smithers.sh/runtime/run-workflow): Execute a workflow programmatically. RunOptions and RunResult types.
+- [renderFrame](https://smithers.sh/runtime/render-frame): Preview the execution graph without running tasks.
+- [Events](https://smithers.sh/runtime/events): All 20+ lifecycle event types with full type definitions.
+- [Revert](https://smithers.sh/runtime/revert): Restore workspace to a previous attempt's state via JJ.
+
+### CLI
+- [CLI Reference](https://smithers.sh/cli/overview): run, resume, approve, deny, status, frames, list, graph, revert commands.
+
+### Integrations
+- [Built-in Tools](https://smithers.sh/integrations/tools): Sandboxed read, write, edit, grep, bash tools with security policies.
+- [CLI Agents](https://smithers.sh/integrations/cli-agents): ClaudeCodeAgent, CodexAgent, GeminiAgent wrappers.
+- [HTTP Server](https://smithers.sh/integrations/server): REST API for run management, SSE event streaming, approval endpoints.
+- [PI Plugin Client](https://smithers.sh/integrations/pi-plugin): Lightweight HTTP client for remote Smithers interaction.
+
+### Examples
+- [Hello World](https://smithers.sh/examples/hello-world): Minimal single-task workflow.
+- [Dynamic Plan](https://smithers.sh/examples/dynamic-plan): Branch between simple and complex execution paths.
+- [Ralph Loop](https://smithers.sh/examples/ralph-loop): Write-then-review iterative refinement loop.
+- [Multi-Agent Review](https://smithers.sh/examples/multi-agent-review): Parallel reviewers with aggregation.
+- [Approval Gate](https://smithers.sh/examples/approval-gate): Human-in-the-loop publish workflow.
+- [Tools Agent](https://smithers.sh/examples/tools-agent): Codebase search with sandboxed tools.
+
+### Reference
+- [Type Reference](https://smithers.sh/reference/types): All exported types including SmithersWorkflow, SmithersCtx, RunOptions, RunResult, TaskDescriptor, SmithersEvent, and component props.

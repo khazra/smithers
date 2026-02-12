@@ -66,6 +66,61 @@ const reviewTable = sqliteTable(
 
 Note the `iteration` column in the primary key. This ensures each iteration's output is stored as a separate row.
 
+## Accessing previous iteration output with `ctx.latest()`
+
+Inside a Ralph loop, the most important pattern is feeding the output of the previous iteration back into the next iteration. Use `ctx.latest(table, nodeId)` to retrieve the most recent output for a task, regardless of which iteration produced it.
+
+**Parameter types:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `table` | `Table \| string` | The schema key (string) passed to `createSmithers`, or a Drizzle table object when using the db-based API. **This is the key in your schema object, not the SQLite table name.** For example, if your schema has `{ finalOutput: z.object({...}) }`, pass `"finalOutput"`, not `"final_output"`. |
+| `nodeId` | `string` | The `id` prop of the `<Task>` whose output you want. |
+
+```tsx
+const { Workflow, smithers } = createSmithers({
+  draft: z.object({ text: z.string(), score: z.number() }),
+  review: z.object({ approved: z.boolean(), feedback: z.string() }),
+});
+
+export default smithers((ctx) => {
+  const latestDraft = ctx.latest("draft", "write");   // string key, not table name
+  const latestReview = ctx.latest("review", "review");
+
+  return (
+    <Workflow name="refine-loop">
+      <Ralph
+        until={latestReview?.approved === true}
+        maxIterations={5}
+      >
+        <Sequence>
+          <Task id="write" output="draft" agent={writer}>
+            {latestReview
+              ? `Improve the draft. Feedback: ${latestReview.feedback}`
+              : `Write a first draft about: ${ctx.input.topic}`}
+          </Task>
+          <Task id="review" output="review" agent={reviewer}>
+            {`Review this draft (score: ${latestDraft?.score ?? "N/A"}):\n${latestDraft?.text ?? ""}`}
+          </Task>
+        </Sequence>
+      </Ralph>
+    </Workflow>
+  );
+});
+```
+
+**How the re-render cycle drives iteration:**
+
+1. On the first render, `ctx.latest("review", "review")` returns `undefined` because no review exists yet. The writer produces an initial draft.
+2. After the write and review tasks complete (iteration 0), the renderer re-renders the tree with the new outputs in context.
+3. Now `ctx.latest("review", "review")` returns the iteration-0 review. The `until` condition is re-evaluated.
+4. If not approved, the next iteration starts. The writer sees the reviewer's feedback and can refine its output.
+5. This continues until the review approves or `maxIterations` is reached.
+
+<Tip>
+Use `ctx.latest()` instead of `ctx.output()` or `ctx.outputMaybe()` when you want the most recent result across all iterations. `ctx.output()` defaults to the *current* iteration, which may not have output yet at render time. `ctx.latest()` searches all iterations and returns the one with the highest iteration number.
+</Tip>
+
 ## Accessing iteration count
 
 Use `ctx.iterationCount()` to check how many iterations have completed for a given task:

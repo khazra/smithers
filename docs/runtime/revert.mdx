@@ -148,7 +148,7 @@ Revert operations emit two events:
 - **`RevertStarted`** -- Fired before the `jj restore` command runs. Includes the `jjPointer` being restored to.
 - **`RevertFinished`** -- Fired after the restore completes. Includes `success` (boolean) and `error` (string, if failed).
 
-See [Events](/docs/runtime/events#revert-events) for the full type definitions.
+See [Events](/runtime/events#revert-events) for the full type definitions.
 
 ## Troubleshooting
 
@@ -169,6 +169,6 @@ Revert only restores the filesystem via JJ. It does not modify the SQLite databa
 
 ## Related
 
-- [Events](/docs/runtime/events) -- RevertStarted and RevertFinished event types.
-- [VCS Integration](/docs/guides/vcs) -- How Smithers integrates with version control.
-- [CLI](/docs/cli/overview) -- Full CLI reference including the revert command.
+- [Events](/runtime/events) -- RevertStarted and RevertFinished event types.
+- [VCS Integration](/guides/vcs) -- How Smithers integrates with version control.
+- [CLI](/cli/overview) -- Full CLI reference including the revert command.
