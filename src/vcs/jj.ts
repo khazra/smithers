@@ -194,7 +194,9 @@ export async function workspaceList(cwd?: string): Promise<WorkspaceInfo[]> {
     const line = raw.trim();
     if (!line) continue;
     const selected = line.startsWith("*");
-    const name = selected ? line.replace(/^\*\s*/, "").trim() : line;
+    const rawName = selected ? line.replace(/^\*\s*/, "").trim() : line;
+    // Older JJ may include columns like path; keep only the first token as name.
+    const name = rawName.split(/\s+/)[0] ?? "";
     if (!name) continue;
     rows.push({ name, path: null, selected });
   }

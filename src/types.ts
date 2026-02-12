@@ -341,6 +341,17 @@ export type ParallelProps = {
   children?: React.ReactNode;
 };
 
+/**
+ * Queue tasks so that at most `maxConcurrency` run concurrently across the group.
+ * Defaults to 1, providing an easy merge queue primitive.
+ */
+export type MergeQueueProps = {
+  id?: string;
+  maxConcurrency?: number; // defaults to 1
+  skipIf?: boolean;
+  children?: React.ReactNode;
+};
+
 export type BranchProps = {
   if: boolean;
   then: React.ReactElement;

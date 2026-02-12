@@ -60,6 +60,17 @@ describe("runJj", () => {
     );
     try { await fs.rm(tmpCwd, { recursive: true, force: true }); } catch {}
   });
+
+  test("normalizes spawn failure to code 127 (jj missing)", async () => {
+    const prev = process.env.PATH || "";
+    process.env.PATH = "/nonexistent"; // ensure jj cannot spawn
+    try {
+      const res = await vcs.runJj(["--version"]);
+      expect(res.code).toBe(127);
+    } finally {
+      process.env.PATH = prev;
+    }
+  });
 });
 
 describe("isJjRepo", () => {
@@ -84,6 +95,26 @@ exit 1
       const ok = await vcs.isJjRepo();
       expect(ok).toBe(false);
     });
+  });
+
+  test("forwards cwd to repo check command", async () => {
+    const tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), "jj-repo-"));
+    await fs.writeFile(path.join(tmpCwd, ".cwd"), "x");
+    const script = `
+if [[ "$1" = "log" && "$2" = "-r" && "$3" = "@" && "$4" = "-n" && "$5" = "1" && "$6" = "--no-graph" ]]; then
+  if [[ -f ./.cwd ]]; then
+    exit 0
+  else
+    exit 9
+  fi
+fi
+exit 1
+`;
+    await withFakeJj(script, async () => {
+      const ok = await vcs.isJjRepo(tmpCwd);
+      expect(ok).toBe(true);
+    });
+    try { await fs.rm(tmpCwd, { recursive: true, force: true }); } catch {}
   });
 });
 
@@ -140,6 +171,20 @@ exit 3
       expect((res.error ?? "").length).toBeGreaterThan(0);
     });
   });
+
+  test("supports --wc-path fallback variant", async () => {
+    const script = `
+if [[ "$1" = "workspace" && "$2" = "add" && "$3" = "--wc-path" ]]; then
+  # args: --wc-path <path> <name> [-r <rev>]
+  exit 0
+fi
+exit 1
+`;
+    await withFakeJj(script, async () => {
+      const res = await vcs.workspaceAdd("name", "/tmp/alt");
+      expect(res.success).toBe(true);
+    });
+  });
 });
 
 describe("workspaceList", () => {
@@ -194,6 +239,28 @@ exit 1
       expect(rows).toEqual([]);
     });
   });
+
+  test("propagates cwd to list command", async () => {
+    const tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), "jj-wslist-"));
+    await fs.writeFile(path.join(tmpCwd, ".sentinel"), "x");
+    const script = `
+if [[ "$1" = "workspace" && "$2" = "list" && "$3" = "-T" ]]; then
+  if [[ -f ./.sentinel ]]; then
+    echo default
+    exit 0
+  else
+    exit 5
+  fi
+fi
+exit 1
+`;
+    await withFakeJj(script, async () => {
+      const rows = await vcs.workspaceList(tmpCwd);
+      expect(rows.length).toBe(1);
+      expect(rows[0]!.name).toBe("default");
+    });
+    try { await fs.rm(tmpCwd, { recursive: true, force: true }); } catch {}
+  });
 });
 
 describe("workspaceClose", () => {
@@ -223,6 +290,26 @@ exit 1
       expect(res.success).toBe(false);
       expect(res.error).toContain("boom");
     });
+  });
+
+  test("propagates cwd to forget", async () => {
+    const tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), "jj-wsc-"));
+    await fs.writeFile(path.join(tmpCwd, ".sentinel"), "x");
+    const script = `
+if [[ "$1" = "workspace" && "$2" = "forget" && "$3" = "x" ]]; then
+  if [[ -f ./.sentinel ]]; then
+    exit 0
+  else
+    exit 7
+  fi
+fi
+exit 1
+`;
+    await withFakeJj(script, async () => {
+      const res = await vcs.workspaceClose("x", { cwd: tmpCwd });
+      expect(res.success).toBe(true);
+    });
+    try { await fs.rm(tmpCwd, { recursive: true, force: true }); } catch {}
   });
 });
 
@@ -262,6 +349,27 @@ exit 1
       const ptr = await vcs.getJjPointer();
       expect(ptr).toBeNull();
     });
+  });
+
+  test("propagates cwd to log command", async () => {
+    const tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), "jj-ptr-"));
+    await fs.writeFile(path.join(tmpCwd, ".sentinel"), "x");
+    const script = `
+if [[ "$1" = "log" && "$2" = "-r" && "$3" = "@" && "$4" = "--no-graph" && "$5" = "--template" && "$6" = "change_id" ]]; then
+  if [[ -f ./.sentinel ]]; then
+    echo ptr
+    exit 0
+  else
+    exit 9
+  fi
+fi
+exit 1
+`;
+    await withFakeJj(script, async () => {
+      const ptr = await vcs.getJjPointer(tmpCwd);
+      expect(ptr).toBe("ptr");
+    });
+    try { await fs.rm(tmpCwd, { recursive: true, force: true }); } catch {}
   });
 });
 

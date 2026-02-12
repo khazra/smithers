@@ -117,6 +117,19 @@ export function extractFromHost(
       const id = resolveStableId(node.rawProps?.id, "parallel", ctx.path);
       nextParallelStack = [...parallelStack, { id, max }];
     }
+    // Treat <MergeQueue> as a parallel-concurrency group with default 1
+    if (node.tag === "smithers:merge-queue") {
+      const max =
+        typeof node.rawProps?.maxConcurrency === "number"
+          ? node.rawProps.maxConcurrency
+          : 1;
+      const id = resolveStableId(
+        node.rawProps?.id,
+        "merge-queue",
+        ctx.path,
+      );
+      nextParallelStack = [...parallelStack, { id, max }];
+    }
     // Entering a Worktree node: push onto the worktree stack
     let nextWorktreeStack = worktreeStack;
     if (node.tag === "smithers:worktree") {

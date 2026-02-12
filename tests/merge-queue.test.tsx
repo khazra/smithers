@@ -1,0 +1,125 @@
+/** @jsxImportSource smithers */
+import { describe, expect, test } from "bun:test";
+import { SmithersRenderer } from "../src/dom/renderer";
+import {
+  MergeQueue,
+  Task,
+  Workflow,
+  runWorkflow,
+  smithers,
+} from "../src/index.ts";
+import { createTestDb, sleep } from "./helpers";
+import { ddl, outputC, schema } from "./schema";
+
+function buildDb() {
+  return createTestDb(schema, ddl);
+}
+
+describe("<MergeQueue>", () => {
+  test("extract sets parallel group with default concurrency 1", async () => {
+    const renderer = new SmithersRenderer();
+    const res = await renderer.render(
+      <Workflow name="mq">
+        <MergeQueue>
+          <Task id="m1" output={outputC}>
+            {{ value: 1 }}
+          </Task>
+          <Task id="m2" output={outputC}>
+            {{ value: 2 }}
+          </Task>
+        </MergeQueue>
+      </Workflow>,
+    );
+    expect(res.tasks.length).toBe(2);
+    const g1 = res.tasks[0]!.parallelGroupId;
+    const g2 = res.tasks[1]!.parallelGroupId;
+    expect(typeof g1).toBe("string");
+    expect(g1 && g1.length > 0).toBe(true);
+    expect(g1).toBe(g2);
+    expect(res.tasks[0]!.parallelMaxConcurrency).toBe(1);
+    expect(res.tasks[1]!.parallelMaxConcurrency).toBe(1);
+  });
+
+  test("skipIf prevents subtree extraction", async () => {
+    const renderer = new SmithersRenderer();
+    const res = await renderer.render(
+      <Workflow name="mq">
+        <MergeQueue skipIf>
+          <Task id="m1" output={outputC}>
+            {{ value: 1 }}
+          </Task>
+        </MergeQueue>
+      </Workflow>,
+    );
+    expect(res.tasks.length).toBe(0);
+  });
+
+  test("engine enforces default concurrency = 1 within queue", async () => {
+    const { db, cleanup } = buildDb();
+    let current = 0;
+    let max = 0;
+    const agent: any = {
+      id: "fake",
+      generate: async ({ prompt }: { prompt: string }) => {
+        current += 1;
+        if (current > max) max = current;
+        await sleep(30);
+        current -= 1;
+        const value = Number((prompt ?? "").split(":")[1] ?? 0);
+        return { output: { value } };
+      },
+    };
+
+    const wf = smithers(db as any, (_ctx) => (
+      <Workflow name="mq-run">
+        <MergeQueue>
+          {Array.from({ length: 4 }, (_, i) => (
+            <Task key={`m${i}`} id={`m${i}`} output={outputC} agent={agent}>
+              {`v:${i}`}
+            </Task>
+          ))}
+        </MergeQueue>
+      </Workflow>
+    ));
+
+    const result = await runWorkflow(wf, { input: {}, maxConcurrency: 4 });
+    expect(result.status).toBe("finished");
+    expect(max).toBeLessThanOrEqual(1);
+    cleanup();
+  });
+
+  test("engine respects provided maxConcurrency on queue", async () => {
+    const { db, cleanup } = buildDb();
+    let current = 0;
+    let max = 0;
+    const agent: any = {
+      id: "fake",
+      generate: async ({ prompt }: { prompt: string }) => {
+        current += 1;
+        if (current > max) max = current;
+        await sleep(20);
+        current -= 1;
+        const value = Number((prompt ?? "").split(":")[1] ?? 0);
+        return { output: { value } };
+      },
+    };
+
+    const wf = smithers(db as any, (_ctx) => (
+      <Workflow name="mq-2">
+        <MergeQueue maxConcurrency={2}>
+          {Array.from({ length: 5 }, (_, i) => (
+            <Task key={`m${i}`} id={`mm${i}`} output={outputC} agent={agent}>
+              {`v:${i}`}
+            </Task>
+          ))}
+        </MergeQueue>
+      </Workflow>
+    ));
+
+    const result = await runWorkflow(wf, { input: {}, maxConcurrency: 4 });
+    expect(result.status).toBe("finished");
+    expect(max).toBeLessThanOrEqual(2);
+    cleanup();
+  });
+});
+

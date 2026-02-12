@@ -7,6 +7,7 @@ import type {
   TaskProps,
   SequenceProps,
   ParallelProps,
+  MergeQueueProps,
   BranchProps,
   RalphProps,
   WorktreeProps,
@@ -80,6 +81,16 @@ export function Sequence(props: SequenceProps) {
 export function Parallel(props: ParallelProps) {
   if (props.skipIf) return null;
   return React.createElement("smithers:parallel", props, props.children);
+}
+ 
+export function MergeQueue(props: MergeQueueProps) {
+  if (props.skipIf) return null;
+  // Default maxConcurrency to 1 when not provided
+  const next: { maxConcurrency: number; id?: string } = {
+    maxConcurrency: props.maxConcurrency ?? 1,
+    id: props.id,
+  };
+  return React.createElement("smithers:merge-queue", next, props.children);
 }
 
 export function Branch(props: BranchProps) {
