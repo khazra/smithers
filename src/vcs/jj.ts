@@ -1,4 +1,12 @@
 import { spawn } from "node:child_process";
+/**
+ * Cross-version-safe JJ helpers.
+ *
+ * - Every helper accepts an optional `cwd` so callers can target a repo path.
+ * - Spawning errors (e.g. jj not installed) are normalized to `code: 127`
+ *   instead of throwing, giving stable error shapes for callers and tests.
+ * - Workspace operations try multiple syntaxes to tolerate JJ version drift.
+ */
 
 export type RunJjOptions = {
   cwd?: string;
