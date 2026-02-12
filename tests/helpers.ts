@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import type { XmlElement } from "../src/types";
+
 
 export function createTestDb<Schema>(schema: Schema, ddl: string) {
   const dir = mkdtempSync(join(tmpdir(), "smithers-"));
@@ -20,4 +22,14 @@ export function createTestDb<Schema>(schema: Schema, ddl: string) {
 
 export function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Lightweight XML element factory for plan-building tests
+export function el(
+  tag: string,
+  props: Record<string, string> = {},
+  children: any[] = [],
+): XmlElement {
+  return { kind: "element", tag, props, children } as XmlElement;
+
 }

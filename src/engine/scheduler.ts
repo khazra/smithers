@@ -2,6 +2,7 @@ import type { XmlNode, TaskDescriptor } from "../types";
 import { resolveStableId } from "../utils/tree-ids";
 import { parseBool, parseNum } from "../utils/parse";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY } from "../constants";
+
 export type PlanNode =
   | { kind: "task"; nodeId: string }
   | { kind: "sequence"; children: PlanNode[] }
@@ -224,6 +225,7 @@ export function scheduleTasks(
   if (plan) {
     walk(plan);
   }
+
 
   return { runnable, pendingExists, waitingApprovalExists, readyRalphs };
 }

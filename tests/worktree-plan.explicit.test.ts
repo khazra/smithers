@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { XmlElement } from "../src/types";
 import { buildPlanTree } from "../src/engine/scheduler";
-
-function el(tag: string, props: Record<string, string> = {}, children: any[] = []): XmlElement {
-  return { kind: "element", tag, props, children } as XmlElement;
-}
+import { el } from "./helpers";
 
 describe("scheduler: explicit worktree + merge-queue plan shape", () => {
   test("worktree is group; merge-queue is parallel(default=1)", () => {

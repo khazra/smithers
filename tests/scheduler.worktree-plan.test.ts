@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { XmlElement } from "../src/types";
 import { buildPlanTree, scheduleTasks } from "../src/engine/scheduler";
-
-function el(tag: string, props: Record<string, string> = {}, children: any[] = []): XmlElement {
-  return { kind: "element", tag, props, children } as XmlElement;
-}
+import { el } from "./helpers";
 
 // Shared minimal descriptor factory for scheduleTasks
 function mk(id: string) {
