@@ -50,8 +50,7 @@
     "typecheck": "tsc --noEmit",
     "cli": "bun run src/cli/index.ts",
     "test": "bun test tests/*.test.ts tests/*.test.tsx",
-    "e2e": "playwright test",
-    "dev": "bun run --filter smithers-desktop dev"
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.36",

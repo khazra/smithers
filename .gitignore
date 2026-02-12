@@ -6,9 +6,6 @@ out
 dist
 *.tgz
 
-# desktop build artifacts
-apps/desktop/build/
-
 # code coverage
 coverage
 *.lcov
@@ -43,14 +40,16 @@ test-results
 # Gemini
 .gemini-clipboard/
 
-# Zig build cache
-.zig-cache/
-
-# Xcode derived data
-apps/desktop/.build/
-
 # Profiling artifacts
 default.profraw
 
 # Deno
 deno.lock
+
+# Smithers runtime artifacts
+.smithers/
+.tui-test/
+.worktrees/
+reference/
+codex/
+ghostty/
