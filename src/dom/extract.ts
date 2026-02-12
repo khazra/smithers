@@ -87,11 +87,16 @@ export function extractFromHost(
     const id = resolveStableId(raw?.id, tag, path);
     // Coerce numeric strings (e.g. from MDX) in line with scheduler.parseNum
     const n = Number(raw?.maxConcurrency);
-    const rawMax = Number.isFinite(n) ? n : undefined;
+    const rawMax = Number.isFinite(n) ? Math.floor(n) : undefined;
+    // Clamp to positive integers to avoid stalling groups with 0/negative.
+    // - merge-queue: default to 1 and always clamp to >= 1
+    // - parallel: only clamp if provided (undefined => unlimited)
     const max =
       tag === "merge-queue"
-        ? rawMax ?? DEFAULT_MERGE_QUEUE_CONCURRENCY
-        : rawMax;
+        ? Math.max(1, rawMax ?? DEFAULT_MERGE_QUEUE_CONCURRENCY)
+        : rawMax != null
+          ? Math.max(1, rawMax)
+          : undefined;
     return [...stack, { id, max }];
   }
 

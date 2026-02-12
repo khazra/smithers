@@ -556,7 +556,10 @@ async function executeTask(
   let payload: any = null;
   let cached = false;
   let cacheKey: string | null = null;
+  let cacheJjBase: string | null = null;
   let responseText: string | null = null;
+  // Resolve effective root once so both caching and execution share it.
+  const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
 
   try {
     if (cacheEnabled) {
@@ -565,6 +568,9 @@ async function executeTask(
       const toolsSig = desc.agent?.tools
         ? Object.keys(desc.agent.tools).sort().join(",")
         : "";
+      // Incorporate JJ state so workspace changes invalidate cache as documented.
+      const jjBase = await getJjPointer(taskRoot);
+      cacheJjBase = jjBase ?? null;
       const cacheBase = {
         workflowName,
         nodeId: desc.nodeId,
@@ -572,6 +578,7 @@ async function executeTask(
         schemaSig,
         agentSig,
         toolsSig,
+        jjPointer: cacheJjBase,
         prompt: desc.prompt ?? null,
         payload: desc.staticPayload ?? null,
       };
@@ -587,8 +594,7 @@ async function executeTask(
       }
     }
 
-  if (!payload) {
-    const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
+    if (!payload) {
       if (desc.agent) {
         const result = await runWithToolContext(
           {
@@ -962,12 +968,12 @@ async function executeTask(
         toolsSig: desc.agent?.tools
           ? Object.keys(desc.agent.tools).sort().join(",")
           : null,
-        jjPointer: null,
+        jjPointer: cacheJjBase,
         payloadJson: JSON.stringify(payload),
       });
     }
-    const taskRootDir = desc.worktreePath ?? toolConfig.rootDir;
-    const jjPointer = await getJjPointer(taskRootDir);
+    // Reuse the resolved taskRoot for JJ pointer capture to avoid recomputing.
+    const jjPointer = await getJjPointer(taskRoot);
 
     await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
       state: "finished",

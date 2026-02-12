@@ -1,6 +1,7 @@
 import type { SmithersDb } from "./db/adapter";
 import type { SmithersEvent } from "./types";
 import { revertToJjPointer } from "./vcs/jj";
+import { nowMs } from "./utils/time";
 
 export type RevertOptions = {
   runId: string;
@@ -47,7 +48,7 @@ export async function revertToAttempt(
     iteration,
     attempt,
     jjPointer,
-    timestampMs: Date.now(),
+    timestampMs: nowMs(),
   });
 
   // Revert must target the same repository/worktree where the attempt ran.
@@ -63,7 +64,7 @@ export async function revertToAttempt(
     jjPointer,
     success: result.success,
     error: result.error,
-    timestampMs: Date.now(),
+    timestampMs: nowMs(),
   });
 
   if (!result.success) {
