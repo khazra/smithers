@@ -266,13 +266,3 @@ Not intended for:
 ## License
 
 MIT
-
----
-
-If you'd like, I can also:
-
-* Tighten this further for a highly technical HN audience
-* Make a shorter version optimized for GitHub skimming
-* Or restructure it around an architecture diagram narrative
-
-The key improvement from here would be adding a short comparison section (e.g., vs LangGraph / Temporal / hand-rolled orchestration) to anchor positioning.
