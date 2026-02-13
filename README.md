@@ -2,13 +2,6 @@
 
 **Deterministic, durable AI workflows defined as React components.**
 
-Smithers is a workflow engine for AI tasks.
-You define the workflow as a JSX tree. Smithers executes it as a DAG, persists every step to SQLite, and can resume from any crash point.
-
-It is designed for cases where prompt chains become brittle, state is lost on failure, and error handling grows ad hoc.
-
----
-
 ## What Smithers Does
 
 * Defines workflows as React component trees
@@ -17,6 +10,7 @@ It is designed for cases where prompt chains become brittle, state is lost on fa
 * Validates outputs against Zod schemas
 * Re-renders the workflow after each step
 * Resumes exactly where it left off after crashes
+* Supports subscriptions
 
 There is no hidden in-memory state. Every task result is stored as:
 
