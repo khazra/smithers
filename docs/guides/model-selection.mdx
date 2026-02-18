@@ -85,7 +85,7 @@ Use `ToolLoopAgent` from the `ai` package when you want API billing instead of a
 import { ToolLoopAgent as Agent, stepCountIs } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
-import { tools } from "smithers-orchestrator/tools";
+import { tools } from "smithers-orchestrator";
 
 const claude = new Agent({
   model: anthropic("claude-opus-4-6"),
@@ -112,7 +112,7 @@ import { ToolLoopAgent as Agent, stepCountIs, type ToolSet } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
-import { tools as smithersTools } from "smithers-orchestrator/tools";
+import { tools as smithersTools } from "smithers-orchestrator";
 import { SYSTEM_PROMPT } from "./system-prompt";
 
 const tools = smithersTools as ToolSet;

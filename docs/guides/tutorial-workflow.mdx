@@ -284,7 +284,7 @@ The engine would detect that `analyze` already has a valid output row, skip it, 
 To give your agents access to the filesystem, add built-in tools:
 
 ```tsx
-import { read, grep, bash } from "smithers-orchestrator/tools";
+import { read, grep, bash } from "smithers-orchestrator";
 
 const analyst = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),

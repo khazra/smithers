@@ -78,6 +78,25 @@ export { createSmithers } from "./create";
 export type { CreateSmithersApi } from "./create";
 export { runWorkflow, renderFrame } from "./engine";
 
+// Tools
+export { tools, read, write, edit, grep, bash } from "./tools/index";
+
+// Server
+export { startServer } from "./server/index";
+export type { ServerOptions } from "./server/index";
+
+// DB
+export { SmithersDb } from "./db/adapter";
+export { ensureSmithersTables } from "./db/ensure";
+
+// Renderer
+export { SmithersRenderer } from "./dom/renderer";
+export type { HostContainer } from "./dom/renderer";
+
+// Revert
+export { revertToAttempt } from "./revert";
+export type { RevertOptions, RevertResult } from "./revert";
+
 // Utilities
 export { mdxPlugin } from "./mdx-plugin";
 export { markdownComponents, renderMdx } from "./mdx-components";

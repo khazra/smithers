@@ -5,7 +5,7 @@ description: An agent that uses built-in tools (read, grep, bash) to search a co
 
 # Tools Agent
 
-Smithers agents can be given **tools** that let them interact with the filesystem and shell. This is useful for tasks like codebase analysis, log searching, or automated refactoring. The built-in tools from `smithers-orchestrator/tools` provide `read`, `grep`, and `bash` capabilities.
+Smithers agents can be given **tools** that let them interact with the filesystem and shell. This is useful for tasks like codebase analysis, log searching, or automated refactoring. The built-in tools from `smithers-orchestrator` provide `read`, `grep`, and `bash` capabilities.
 
 ## Workflow Definition
 
@@ -14,7 +14,7 @@ Smithers agents can be given **tools** that let them interact with the filesyste
 import { createSmithers, Task, Sequence } from "smithers-orchestrator";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { tools } from "smithers-orchestrator/tools";
+import { tools } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { Workflow, smithers } = createSmithers({
@@ -92,10 +92,10 @@ Import all tools at once or pick individual ones:
 
 ```tsx
 // Import all tools
-import { tools } from "smithers-orchestrator/tools";
+import { tools } from "smithers-orchestrator";
 
 // Or import individually
-import { read, grep, bash } from "smithers-orchestrator/tools";
+import { read, grep, bash } from "smithers-orchestrator";
 ```
 
 | Tool | Description |

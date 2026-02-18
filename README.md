@@ -226,7 +226,7 @@ smithers approve workflow.tsx --run-id abc123 --node-id review
 ## Built-in Tools
 
 ```tsx
-import { read, edit, bash, grep, write } from "smithers-orchestrator/tools";
+import { read, edit, bash, grep, write } from "smithers-orchestrator";
 ```
 
 * Sandboxed to workflow root

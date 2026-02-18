@@ -98,9 +98,7 @@ During execution, `RevertStarted` and `RevertFinished` events are printed as JSO
 You can also revert programmatically using the `revertToAttempt` function:
 
 ```ts
-import { SmithersDb } from "smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "smithers-orchestrator/db/ensure";
-import { revertToAttempt } from "smithers-orchestrator/revert";
+import { SmithersDb, ensureSmithersTables, revertToAttempt } from "smithers-orchestrator";
 
 const adapter = new SmithersDb(db);
 

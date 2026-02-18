@@ -18,7 +18,7 @@ import {
   type PiAgentOptions,
   type PiExtensionUiRequest,
   type PiExtensionUiResponse,
-} from "smithers-orchestrator/agents/cli";
+} from "smithers-orchestrator";
 ```
 
 ## Prerequisites
@@ -35,7 +35,7 @@ Each agent requires its corresponding CLI tool installed and available in the sy
 ## Quick Start
 
 ```ts
-import { ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent } from "smithers-orchestrator/agents/cli";
+import { ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent } from "smithers-orchestrator";
 
 const claude = new ClaudeCodeAgent({ model: "claude-sonnet-4-20250514" });
 const codex = new CodexAgent({ model: "gpt-4.1" });
@@ -391,7 +391,7 @@ When called with messages (as Smithers does internally), the agents convert them
 ## Example: Multi-Agent Workflow
 
 ```tsx
-import { ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator/agents/cli";
+import { ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
 
 const reviewer = new ClaudeCodeAgent({
   model: "claude-sonnet-4-20250514",

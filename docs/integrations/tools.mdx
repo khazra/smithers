@@ -8,7 +8,7 @@ Smithers provides five built-in tools that are compatible with the AI SDK `tool`
 ## Import
 
 ```ts
-import { tools, read, write, edit, grep, bash } from "smithers-orchestrator/tools";
+import { tools, read, write, edit, grep, bash } from "smithers-orchestrator";
 ```
 
 The `tools` object is a convenience bundle containing all five tools keyed by name:
@@ -74,7 +74,7 @@ Read a file from the filesystem.
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, grep } from "smithers-orchestrator/tools";
+import { read, grep } from "smithers-orchestrator";
 
 const codeAgent = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),
@@ -115,7 +115,7 @@ Write content to a file, creating parent directories as needed.
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { write, read } from "smithers-orchestrator/tools";
+import { write, read } from "smithers-orchestrator";
 
 const writerAgent = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),
@@ -248,7 +248,7 @@ Local `git` commands (e.g., `git status`, `git diff`, `git log`) are allowed eve
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash } from "smithers-orchestrator/tools";
+import { bash } from "smithers-orchestrator";
 
 const devAgent = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),
@@ -271,7 +271,7 @@ The standard pattern is to pass tools to an AI SDK agent, then assign that agent
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, edit, grep, bash } from "smithers-orchestrator/tools";
+import { read, write, edit, grep, bash } from "smithers-orchestrator";
 
 const codeAgent = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),
@@ -293,7 +293,7 @@ You can also pass the entire `tools` bundle:
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { tools } from "smithers-orchestrator/tools";
+import { tools } from "smithers-orchestrator";
 
 const fullAgent = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),

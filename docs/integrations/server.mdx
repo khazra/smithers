@@ -8,13 +8,13 @@ Smithers includes a built-in HTTP server that exposes workflows via a REST API. 
 ## Import
 
 ```ts
-import { startServer } from "smithers-orchestrator/server";
+import { startServer } from "smithers-orchestrator";
 ```
 
 ## Quick Start
 
 ```ts
-import { startServer } from "smithers-orchestrator/server";
+import { startServer } from "smithers-orchestrator";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 
 const db = drizzle("./smithers.db");
@@ -375,7 +375,7 @@ Events are mirrored asynchronously and do not block the workflow execution.
 ## Example: Full Server Setup
 
 ```ts
-import { startServer } from "smithers-orchestrator/server";
+import { startServer } from "smithers-orchestrator";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 
 const db = drizzle("./server.db");

@@ -176,7 +176,7 @@ Centralize agent setup in `agents.ts`. This makes it easy to swap between API an
 // agents.ts
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, grep, bash, edit, write } from "smithers-orchestrator/tools";
+import { read, grep, bash, edit, write } from "smithers-orchestrator";
 
 const MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-4-20250514";
 
