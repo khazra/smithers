@@ -155,17 +155,15 @@ export function resolveSchema(db: any): Record<string, any> {
 
 /**
  * Resolve task output references:
- * - ZodObject on outputSchema with empty outputTableName → look up via zodToKeyName
- * - String key on outputTableName → look up via schemaRegistry
- * Both paths set outputTable, outputTableName, and outputSchema on the descriptor.
+ * Match the ZodObject on outputSchema against zodToKeyName to find the
+ * schema registry entry, then set outputTable and outputTableName.
  */
 function resolveTaskOutputs(tasks: TaskDescriptor[], workflow: SmithersWorkflow<any>) {
   for (const task of tasks) {
     // Already resolved (has a table)
     if (task.outputTable) continue;
 
-    // ZodObject reference: outputSchema is set but outputTableName is empty
-    if (task.outputSchema && !task.outputTableName && workflow.zodToKeyName) {
+    if (task.outputSchema && workflow.zodToKeyName) {
       const keyName = workflow.zodToKeyName.get(task.outputSchema);
       if (keyName && workflow.schemaRegistry) {
         const entry = workflow.schemaRegistry.get(keyName);
@@ -178,23 +176,6 @@ function resolveTaskOutputs(tasks: TaskDescriptor[], workflow: SmithersWorkflow<
         throw new SmithersError(
           "UNKNOWN_OUTPUT_SCHEMA",
           `Task "${task.nodeId}" uses an output ZodObject that is not registered in createSmithers()`,
-        );
-      }
-      continue;
-    }
-
-    // String key: outputTableName is set
-    if (task.outputTableName && workflow.schemaRegistry) {
-      const entry = workflow.schemaRegistry.get(task.outputTableName);
-      if (entry) {
-        task.outputTable = entry.table;
-        if (!task.outputSchema) {
-          task.outputSchema = entry.zodSchema;
-        }
-      } else {
-        throw new SmithersError(
-          "UNKNOWN_OUTPUT_KEY",
-          `Task "${task.nodeId}" uses output key "${task.outputTableName}" which is not in the schema registry`,
         );
       }
     }

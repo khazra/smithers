@@ -28,21 +28,21 @@ describe("docs examples (renderer)", () => {
         <Branch
           if={true}
           then={
-            <Task id="then-task" output="outputA">
+            <Task id="then-task" output={outputSchemas.outputA}>
               {{ value: 1 }}
             </Task>
           }
           else={
-            <Task id="else-task" output="outputB">
+            <Task id="else-task" output={outputSchemas.outputB}>
               {{ value: 2 }}
             </Task>
           }
         />
         <Parallel maxConcurrency={2}>
-          <Task id="p1" output="outputA">
+          <Task id="p1" output={outputSchemas.outputA}>
             {{ value: 3 }}
           </Task>
-          <Task id="p2" output="outputB">
+          <Task id="p2" output={outputSchemas.outputB}>
             {{ value: 4 }}
           </Task>
         </Parallel>
@@ -68,7 +68,7 @@ describe("docs examples (renderer)", () => {
       <Workflow name="props">
         <Task
           id="t"
-          output="outputA"
+          output={outputSchemas.outputA}
           retries={2}
           timeoutMs={1234}
           continueOnFail
@@ -97,7 +97,7 @@ describe("docs examples (renderer)", () => {
     const result = await renderer.render(
       <Workflow name="loop">
         <Ralph id="review-loop" until={false}>
-          <Task id="review" output="outputA">
+          <Task id="review" output={outputSchemas.outputA}>
             {{ value: 1 }}
           </Task>
         </Ralph>
@@ -119,6 +119,7 @@ describe("docs examples (engine)", () => {
       Workflow,
       Task,
       smithers: build,
+      outputs,
     } = createSmithers(
       {
         output: z.object({ echo: z.string() }),
@@ -128,7 +129,7 @@ describe("docs examples (engine)", () => {
 
     const workflow = build((ctx) => (
       <Workflow name="schema-input">
-        <Task id="echo" output="output">
+        <Task id="echo" output={outputs.output}>
           {{ echo: String(ctx.input.message) }}
         </Task>
       </Workflow>
@@ -153,7 +154,7 @@ describe("docs examples (engine)", () => {
   });
 
   test("retries re-run a failing agent", async () => {
-    const { smithers, cleanup } = createTestSmithers(outputSchemas);
+    const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
     let calls = 0;
     const flakyAgent = {
       id: "flaky",
@@ -170,7 +171,7 @@ describe("docs examples (engine)", () => {
     try {
       const workflow = smithers(() => (
         <Workflow name="retries">
-          <Task id="flaky" output="outputA" agent={flakyAgent} retries={1}>
+          <Task id="flaky" output={outputs.outputA} agent={flakyAgent} retries={1}>
             Retry me
           </Task>
         </Workflow>
@@ -192,7 +193,7 @@ describe("docs examples (engine)", () => {
   });
 
   test("continueOnFail allows downstream tasks to execute", async () => {
-    const { smithers, tables, db, cleanup } = createTestSmithers(outputSchemas);
+    const { smithers, tables, db, outputs, cleanup } = createTestSmithers(outputSchemas);
     const failingAgent = {
       id: "fail",
       tools: {},
@@ -207,13 +208,13 @@ describe("docs examples (engine)", () => {
           <Sequence>
             <Task
               id="fail"
-              output="outputA"
+              output={outputs.outputA}
               agent={failingAgent}
               continueOnFail
             >
               Fail
             </Task>
-            <Task id="ok" output="outputB">
+            <Task id="ok" output={outputs.outputB}>
               {{ value: 2 }}
             </Task>
           </Sequence>
@@ -234,7 +235,7 @@ describe("docs examples (engine)", () => {
   });
 
   test("timeoutMs is forwarded to agent.generate", async () => {
-    const { smithers, cleanup } = createTestSmithers(outputSchemas);
+    const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
     let seenTimeout: number | undefined;
     const timedAgent = {
       id: "timed",
@@ -248,7 +249,7 @@ describe("docs examples (engine)", () => {
     try {
       const workflow = smithers(() => (
         <Workflow name="timeout">
-          <Task id="timed" output="outputA" agent={timedAgent} timeoutMs={1234}>
+          <Task id="timed" output={outputs.outputA} agent={timedAgent} timeoutMs={1234}>
             Timing
           </Task>
         </Workflow>
@@ -266,7 +267,7 @@ describe("docs examples (engine)", () => {
   });
 
   test("tool context allows built-in tools to run", async () => {
-    const { smithers, tables, db, cleanup } = createTestSmithers(outputSchemas);
+    const { smithers, tables, db, outputs, cleanup } = createTestSmithers(outputSchemas);
     const dir = mkdtempSync(join(tmpdir(), "smithers-tools-"));
     const filePath = join(dir, "sample.txt");
     writeFileSync(filePath, "hello", "utf8");
@@ -283,7 +284,7 @@ describe("docs examples (engine)", () => {
     try {
       const workflow = smithers(() => (
         <Workflow name="tools">
-          <Task id="read" output="outputA" agent={toolAgent}>
+          <Task id="read" output={outputs.outputA} agent={toolAgent}>
             Read file
           </Task>
         </Workflow>

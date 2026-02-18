@@ -14,10 +14,10 @@ describe("<Parallel> edge maxConcurrency semantics", () => {
     const renderer = new SmithersRenderer();
     const base = (
       <>
-        <Task id="p1" output="outputC">
+        <Task id="p1" output={outputSchemas.outputC}>
           {{ value: 1 }}
         </Task>
-        <Task id="p2" output="outputC">
+        <Task id="p2" output={outputSchemas.outputC}>
           {{ value: 2 }}
         </Task>
       </>
@@ -52,7 +52,7 @@ describe("<Parallel> edge maxConcurrency semantics", () => {
   });
 
   test("engine: non-positive => only global limit applies (unbounded group)", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, cleanup, outputs } = buildSmithers();
     let current = 0, peak = 0;
     const agent: any = {
       id: "fake",
@@ -71,7 +71,7 @@ describe("<Parallel> edge maxConcurrency semantics", () => {
         <Workflow name={`par-edge-run-${String(mc)}`}>
           <Parallel maxConcurrency={mc}>
             {Array.from({ length: 6 }, (_, i) => (
-              <Task key={`p${i}`} id={`p${mc}-${i}`} output="outputC" agent={agent}>
+              <Task key={`p${i}`} id={`p${mc}-${i}`} output={outputs.outputC} agent={agent}>
                 run task
               </Task>
             ))}
@@ -91,7 +91,7 @@ describe("<Parallel> edge maxConcurrency semantics", () => {
   });
 
   test("engine: fractional floors to integer cap", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, cleanup, outputs } = buildSmithers();
     let current = 0, peak = 0;
     const agent: any = {
       id: "fake",
@@ -108,7 +108,7 @@ describe("<Parallel> edge maxConcurrency semantics", () => {
       <Workflow name="par-frac">
         <Parallel maxConcurrency={2.9}>
           {Array.from({ length: 5 }, (_, i) => (
-            <Task key={`pf${i}`} id={`pf${i}`} output="outputC" agent={agent}>
+            <Task key={`pf${i}`} id={`pf${i}`} output={outputs.outputC} agent={agent}>
               run task
             </Task>
           ))}

@@ -10,14 +10,14 @@ const dbPath = join(
   "db.sqlite",
 );
 
-const { smithers } = createSmithers(
+const { smithers, outputs } = createSmithers(
   { outputA: z.object({ value: z.number() }) },
   { dbPath },
 );
 
 export default smithers((_ctx) => (
   <Workflow name="test-workflow">
-    <Task id="step1" output="outputA">
+    <Task id="step1" output={outputs.outputA}>
       {{ value: 42 }}
     </Task>
   </Workflow>

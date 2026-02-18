@@ -347,7 +347,7 @@ export type WorkflowProps = {
 export type TaskProps<Row> = {
   key?: string;
   id: string;
-  output: import("zod").ZodObject<any> | string;
+  output: import("zod").ZodObject<any>;
   agent?: AgentLike;
   skipIf?: boolean;
   needsApproval?: boolean;

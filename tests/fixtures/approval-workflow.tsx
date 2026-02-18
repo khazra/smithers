@@ -10,7 +10,7 @@ const dbPath = join(
   "db.sqlite",
 );
 
-const { smithers } = createSmithers(
+const { smithers, outputs } = createSmithers(
   {
     outputA: z.object({ value: z.number() }),
     outputB: z.object({ value: z.number() }),
@@ -21,10 +21,10 @@ const { smithers } = createSmithers(
 export default smithers((_ctx) => (
   <Workflow name="approval-workflow">
     <Sequence>
-      <Task id="gate" output="outputA" needsApproval>
+      <Task id="gate" output={outputs.outputA} needsApproval>
         {{ value: 1 }}
       </Task>
-      <Task id="after" output="outputB">
+      <Task id="after" output={outputs.outputB}>
         {{ value: 2 }}
       </Task>
     </Sequence>

@@ -19,11 +19,11 @@ function buildSmithers() {
 
 describe("Ralph iteration", () => {
   test("iterates until condition met", async () => {
-    const { smithers, tables, db, cleanup } = buildSmithers();
+    const { smithers, outputs, tables, db, cleanup } = buildSmithers();
     const workflow = smithers((ctx) => (
       <Workflow name="loop">
         <Ralph id="loop" until={ctx.outputs("outputA").length >= 2}>
-          <Task id="step" output="outputA">
+          <Task id="step" output={outputs.outputA}>
             {{ value: ctx.outputs("outputA").length }}
           </Task>
         </Ralph>
@@ -42,17 +42,17 @@ describe("Ralph iteration", () => {
   });
 
   test("multiple Ralph loops are independent", async () => {
-    const { smithers, tables, db, cleanup } = buildSmithers();
+    const { smithers, outputs, tables, db, cleanup } = buildSmithers();
     const workflow = smithers((ctx) => (
       <Workflow name="multi">
         <Sequence>
           <Ralph id="loopA" until={ctx.outputs("outputA").length >= 2}>
-            <Task id="taskA" output="outputA">
+            <Task id="taskA" output={outputs.outputA}>
               {{ value: ctx.outputs("outputA").length }}
             </Task>
           </Ralph>
           <Ralph id="loopB" until={ctx.outputs("outputB").length >= 1}>
-            <Task id="taskB" output="outputB">
+            <Task id="taskB" output={outputs.outputB}>
               {{ value: ctx.outputs("outputB").length }}
             </Task>
           </Ralph>
@@ -77,12 +77,12 @@ describe("Ralph iteration", () => {
   });
 
   test("nested Ralph throws", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, outputs, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="nested">
         <Ralph id="outer" until={false}>
           <Ralph id="inner" until={true}>
-            <Task id="innerTask" output="outputA">
+            <Task id="innerTask" output={outputs.outputA}>
               {{ value: 1 }}
             </Task>
           </Ralph>
@@ -98,7 +98,7 @@ describe("Ralph iteration", () => {
 
 describe("Parallel concurrency", () => {
   test("respects maxConcurrency", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, outputs, cleanup } = buildSmithers();
     let current = 0;
     let max = 0;
 
@@ -118,7 +118,7 @@ describe("Parallel concurrency", () => {
       <Workflow name="parallel">
         <Parallel maxConcurrency={2}>
           {Array.from({ length: 5 }, (_, i) => (
-            <Task key={`p${i}`} id={`p${i}`} output="outputC" agent={agent}>
+            <Task key={`p${i}`} id={`p${i}`} output={outputs.outputC} agent={agent}>
               run task
             </Task>
           ))}
@@ -138,14 +138,14 @@ describe("Parallel concurrency", () => {
 
 describe("Approvals", () => {
   test("needsApproval pauses and resumes", async () => {
-    const { smithers, tables, db, cleanup } = buildSmithers();
+    const { smithers, outputs, tables, db, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="approval">
         <Sequence>
-          <Task id="gate" output="outputA" needsApproval>
+          <Task id="gate" output={outputs.outputA} needsApproval>
             {{ value: 1 }}
           </Task>
-          <Task id="after" output="outputB">
+          <Task id="after" output={outputs.outputB}>
             {{ value: 2 }}
           </Task>
         </Sequence>
@@ -173,10 +173,10 @@ describe("Approvals", () => {
 
 describe("Compute callback children", () => {
   test("sync callback is invoked and result written to db", async () => {
-    const { smithers, tables, db, cleanup } = buildSmithers();
+    const { smithers, outputs, tables, db, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="compute-sync">
-        <Task id="calc" output="outputA">
+        <Task id="calc" output={outputs.outputA}>
           {() => ({ value: 40 + 2 })}
         </Task>
       </Workflow>
@@ -192,10 +192,10 @@ describe("Compute callback children", () => {
   });
 
   test("async callback is awaited and result written to db", async () => {
-    const { smithers, tables, db, cleanup } = buildSmithers();
+    const { smithers, outputs, tables, db, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="compute-async">
-        <Task id="calc" output="outputA">
+        <Task id="calc" output={outputs.outputA}>
           {async () => {
             await sleep(10);
             return { value: 99 };
@@ -214,10 +214,10 @@ describe("Compute callback children", () => {
   });
 
   test("callback that throws fails the task", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, outputs, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="compute-fail">
-        <Task id="calc" output="outputA">
+        <Task id="calc" output={outputs.outputA}>
           {() => { throw new Error("compute boom"); }}
         </Task>
       </Workflow>
@@ -229,10 +229,10 @@ describe("Compute callback children", () => {
   });
 
   test("callback respects timeoutMs", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, outputs, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="compute-timeout">
-        <Task id="slow" output="outputA" timeoutMs={50}>
+        <Task id="slow" output={outputs.outputA} timeoutMs={50}>
           {async () => {
             await sleep(500);
             return { value: 1 };
@@ -247,7 +247,7 @@ describe("Compute callback children", () => {
   });
 
   test("callback retries on failure", async () => {
-    const { smithers, tables, db, cleanup } = buildSmithers();
+    const { smithers, outputs, tables, db, cleanup } = buildSmithers();
     let calls = 0;
     const fn = () => {
       calls++;
@@ -257,7 +257,7 @@ describe("Compute callback children", () => {
 
     const workflow = smithers((_ctx) => (
       <Workflow name="compute-retry">
-        <Task id="retryable" output="outputA" retries={2}>
+        <Task id="retryable" output={outputs.outputA} retries={2}>
           {fn}
         </Task>
       </Workflow>
@@ -274,14 +274,14 @@ describe("Compute callback children", () => {
   });
 
   test("callback with continueOnFail does not fail workflow", async () => {
-    const { smithers, tables, db, cleanup } = buildSmithers();
+    const { smithers, outputs, tables, db, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="compute-continue">
         <Sequence>
-          <Task id="bomb" output="outputA" continueOnFail>
+          <Task id="bomb" output={outputs.outputA} continueOnFail>
             {() => { throw new Error("boom"); }}
           </Task>
-          <Task id="after" output="outputB">
+          <Task id="after" output={outputs.outputB}>
             {{ value: 42 }}
           </Task>
         </Sequence>
@@ -298,14 +298,14 @@ describe("Compute callback children", () => {
   });
 
   test("callback in a sequence works with static tasks", async () => {
-    const { smithers, tables, db, cleanup } = buildSmithers();
+    const { smithers, outputs, tables, db, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="compute-sequence">
         <Sequence>
-          <Task id="first" output="outputA">
+          <Task id="first" output={outputs.outputA}>
             {() => ({ value: 10 })}
           </Task>
-          <Task id="second" output="outputB">
+          <Task id="second" output={outputs.outputB}>
             {{ value: 20 }}
           </Task>
         </Sequence>
@@ -325,14 +325,14 @@ describe("Compute callback children", () => {
 
 describe("Renderer safeguards", () => {
   test("duplicate task ids fail the run", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, outputs, cleanup } = buildSmithers();
     const workflow = smithers((_ctx) => (
       <Workflow name="dup">
         <Sequence>
-          <Task id="dup" output="outputA">
+          <Task id="dup" output={outputs.outputA}>
             {{ value: 1 }}
           </Task>
-          <Task id="dup" output="outputB">
+          <Task id="dup" output={outputs.outputB}>
             {{ value: 2 }}
           </Task>
         </Sequence>

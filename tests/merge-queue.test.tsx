@@ -21,10 +21,10 @@ describe("<MergeQueue>", () => {
     const res = await renderer.render(
       <Workflow name="mq-id">
         <MergeQueue id="my-queue">
-          <Task id="a" output="outputC">
+          <Task id="a" output={outputSchemas.outputC}>
             {{ value: 1 }}
           </Task>
-          <Task id="b" output="outputC">
+          <Task id="b" output={outputSchemas.outputC}>
             {{ value: 2 }}
           </Task>
         </MergeQueue>
@@ -40,10 +40,10 @@ describe("<MergeQueue>", () => {
     const res = await renderer.render(
       <Workflow name="mq">
         <MergeQueue>
-          <Task id="m1" output="outputC">
+          <Task id="m1" output={outputSchemas.outputC}>
             {{ value: 1 }}
           </Task>
-          <Task id="m2" output="outputC">
+          <Task id="m2" output={outputSchemas.outputC}>
             {{ value: 2 }}
           </Task>
         </MergeQueue>
@@ -64,7 +64,7 @@ describe("<MergeQueue>", () => {
     const res = await renderer.render(
       <Workflow name="mq">
         <MergeQueue skipIf>
-          <Task id="m1" output="outputC">
+          <Task id="m1" output={outputSchemas.outputC}>
             {{ value: 1 }}
           </Task>
         </MergeQueue>
@@ -74,7 +74,7 @@ describe("<MergeQueue>", () => {
   });
 
   test("engine enforces default concurrency = 1 within queue", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, cleanup, outputs } = buildSmithers();
     let current = 0;
     let max = 0;
     const agent: any = {
@@ -92,7 +92,7 @@ describe("<MergeQueue>", () => {
       <Workflow name="mq-run">
         <MergeQueue>
           {Array.from({ length: 4 }, (_, i) => (
-            <Task key={`m${i}`} id={`m${i}`} output="outputC" agent={agent}>
+            <Task key={`m${i}`} id={`m${i}`} output={outputs.outputC} agent={agent}>
               {`v:${i}`}
             </Task>
           ))}
@@ -107,7 +107,7 @@ describe("<MergeQueue>", () => {
   });
 
   test("engine respects provided maxConcurrency on queue", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, cleanup, outputs } = buildSmithers();
     let current = 0;
     let max = 0;
     const agent: any = {
@@ -125,7 +125,7 @@ describe("<MergeQueue>", () => {
       <Workflow name="mq-2">
         <MergeQueue maxConcurrency={2}>
           {Array.from({ length: 5 }, (_, i) => (
-            <Task key={`m${i}`} id={`mm${i}`} output="outputC" agent={agent}>
+            <Task key={`m${i}`} id={`mm${i}`} output={outputs.outputC} agent={agent}>
               {`v:${i}`}
             </Task>
           ))}
@@ -139,7 +139,7 @@ describe("<MergeQueue>", () => {
     cleanup();
   });
   test("innermost group controls concurrency when nested inside Parallel", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, cleanup, outputs } = buildSmithers();
     let queueCurrent = 0, queueMax = 0;
     let outsideCurrent = 0, outsideMax = 0;
     const agent: any = {
@@ -166,15 +166,15 @@ describe("<MergeQueue>", () => {
         <Parallel maxConcurrency={3}>
           <MergeQueue>
             {Array.from({ length: 3 }, (_, i) => (
-              <Task key={`q${i}`} id={`q${i}`} output="outputC" agent={agent}>
+              <Task key={`q${i}`} id={`q${i}`} output={outputs.outputC} agent={agent}>
                 {`q:${i}`}
               </Task>
             ))}
           </MergeQueue>
-          <Task id="o0" output="outputC" agent={agent}>
+          <Task id="o0" output={outputs.outputC} agent={agent}>
             o:0
           </Task>
-          <Task id="o1" output="outputC" agent={agent}>
+          <Task id="o1" output={outputs.outputC} agent={agent}>
             o:1
           </Task>
         </Parallel>
@@ -192,10 +192,10 @@ describe("<MergeQueue>", () => {
     const renderer = new SmithersRenderer();
     const baseChildren = (
       <>
-        <Task id="e1" output="outputC">
+        <Task id="e1" output={outputSchemas.outputC}>
           {{ value: 1 }}
         </Task>
-        <Task id="e2" output="outputC">
+        <Task id="e2" output={outputSchemas.outputC}>
           {{ value: 2 }}
         </Task>
       </>
@@ -230,7 +230,7 @@ describe("<MergeQueue>", () => {
   });
 
   test("engine clamps non-positive and fractional to 1 for MergeQueue", async () => {
-    const { smithers, cleanup } = buildSmithers();
+    const { smithers, cleanup, outputs } = buildSmithers();
     let concurrent = 0;
     let peak = 0;
     const agent: any = {
@@ -250,7 +250,7 @@ describe("<MergeQueue>", () => {
         <Workflow name={`mq-edge-run-${String(mc)}`}>
           <MergeQueue maxConcurrency={mc}>
             {Array.from({ length: 3 }, (_, i) => (
-              <Task key={`t${i}`} id={`t${mc}-${i}`} output="outputC" agent={agent}>
+              <Task key={`t${i}`} id={`t${mc}-${i}`} output={outputs.outputC} agent={agent}>
                 run task
               </Task>
             ))}

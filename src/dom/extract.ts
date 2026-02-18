@@ -196,16 +196,9 @@ export function extractFromHost(
         throw new Error(`Task ${nodeId} is missing output.`);
       }
 
-      // Support both ZodObject schemas and string keys
-      let outputTable: any = null;
-      let outputTableName: string;
-      if (typeof outputRaw === "string") {
-        // String key — will be resolved by the engine via schemaRegistry
-        outputTableName = outputRaw;
-      } else {
-        // ZodObject — engine will resolve table + name via zodToKeyName map
-        outputTableName = "";
-      }
+      // ZodObject — engine will resolve table + name via zodToKeyName map
+      const outputTable: any = null;
+      const outputTableName = "";
       const needsApproval = Boolean(raw.needsApproval);
       const skipIf = Boolean(raw.skipIf);
       const retries = typeof raw.retries === "number" ? raw.retries : 0;
@@ -241,7 +234,7 @@ export function extractFromHost(
         worktreePath: topWorktree?.path,
         outputTable,
         outputTableName,
-        outputSchema: typeof outputRaw === "string" ? undefined : outputRaw,
+        outputSchema: outputRaw,
         needsApproval,
         skipIf,
         retries,
