@@ -1,21 +1,25 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { markdownComponents } from "./mdx-components";
-import { zodSchemaToJsonExample } from "./zod-to-example";
-import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR } from "./constants";
-import type {
-  WorkflowProps,
-  TaskProps,
-  SequenceProps,
-  ParallelProps,
-  MergeQueueProps,
-  BranchProps,
-  RalphProps,
-  WorktreeProps,
-} from "./types";
-export function Workflow(props: WorkflowProps) {
-  return React.createElement("smithers:workflow", props, props.children);
-}
+import { markdownComponents } from "../markdownComponents";
+import { zodSchemaToJsonExample } from "../zod-to-example";
+import type { AgentLike } from "../AgentLike";
+
+export type TaskProps<Row> = {
+  key?: string;
+  id: string;
+  output: import("zod").ZodObject<any>;
+  agent?: AgentLike;
+  /** Fallback agent used on retry when the primary agent fails (e.g. rate-limited). */
+  fallbackAgent?: AgentLike;
+  skipIf?: boolean;
+  needsApproval?: boolean;
+  timeoutMs?: number;
+  retries?: number;
+  continueOnFail?: boolean;
+  label?: string;
+  meta?: Record<string, unknown>;
+  children: string | Row | (() => Row | Promise<Row>) | React.ReactNode;
+};
 
 /**
  * Render JSX children to plain markdown text.
@@ -93,48 +97,4 @@ export function Task<Row>(props: TaskProps<Row>) {
     __payload: children,
   } as any;
   return React.createElement("smithers:task", nextProps, null);
-}
-
-export function Sequence(props: SequenceProps) {
-  if (props.skipIf) return null;
-  return React.createElement("smithers:sequence", props, props.children);
-}
-
-export function Parallel(props: ParallelProps) {
-  if (props.skipIf) return null;
-  // Align prop sanitization with other structural components
-  const next: { maxConcurrency?: number; id?: string } = {
-    maxConcurrency: props.maxConcurrency,
-    id: props.id,
-  };
-  return React.createElement("smithers:parallel", next, props.children);
-}
-
-export function MergeQueue(props: MergeQueueProps) {
-  if (props.skipIf) return null;
-  const next: { maxConcurrency: number; id?: string } = {
-    maxConcurrency: props.maxConcurrency ?? DEFAULT_MERGE_QUEUE_CONCURRENCY,
-    id: props.id,
-  };
-  return React.createElement("smithers:merge-queue", next, props.children);
-}
-
-export function Branch(props: BranchProps) {
-  if (props.skipIf) return null;
-  const chosen = props.if ? props.then : (props.else ?? null);
-  return React.createElement("smithers:branch", props, chosen);
-}
-
-export function Ralph(props: RalphProps) {
-  if (props.skipIf) return null;
-  return React.createElement("smithers:ralph", props, props.children);
-}
-
-export function Worktree(props: WorktreeProps) {
-  if (typeof props.path !== "string" || props.path.trim() === "") {
-    throw new Error(WORKTREE_EMPTY_PATH_ERROR);
-  }
-  if (props.skipIf) return null;
-  const next: { id?: string; path: string } = { id: props.id, path: props.path };
-  return React.createElement("smithers:worktree", next, props.children);
 }
