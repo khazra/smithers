@@ -1,10 +1,8 @@
-import type {
-  SmithersWorkflow,
-  RunOptions,
-  RunResult,
-  SmithersEvent,
-  TaskDescriptor,
-} from "../types";
+import type { SmithersWorkflow } from "../SmithersWorkflow";
+import type { RunOptions } from "../RunOptions";
+import type { RunResult } from "../RunResult";
+import type { SmithersEvent } from "../SmithersEvent";
+import type { TaskDescriptor } from "../TaskDescriptor";
 import { SmithersRenderer } from "../dom/renderer";
 import { buildContext } from "../context";
 import { loadInput, loadOutputs } from "../db/snapshot";
@@ -50,6 +48,54 @@ import { platform } from "node:os";
  */
 const createdWorktrees = new Set<string>();
 
+function makeAbortError(message = "Task aborted"): Error {
+  const err = new Error(message);
+  (err as any).name = "AbortError";
+  return err;
+}
+
+function isAbortError(err: unknown): boolean {
+  if (!err) return false;
+  if ((err as any).name === "AbortError") return true;
+  if (
+    typeof DOMException !== "undefined" &&
+    err instanceof DOMException &&
+    err.name === "AbortError"
+  ) {
+    return true;
+  }
+  if (err instanceof Error) {
+    return /aborted|abort/i.test(err.message);
+  }
+  return false;
+}
+
+function abortPromise(signal?: AbortSignal): Promise<never> | null {
+  if (!signal) return null;
+  if (signal.aborted) return Promise.reject(makeAbortError());
+  return new Promise<never>((_, reject) => {
+    signal.addEventListener("abort", () => reject(makeAbortError()), {
+      once: true,
+    });
+  });
+}
+
+async function runGitCommand(
+  cwd: string,
+  args: string[],
+): Promise<{ code: number; stderr: string }> {
+  return await new Promise<{ code: number; stderr: string }>((res) => {
+    const child = nodeSpawn("git", args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    child.on("error", (err) => res({ code: 127, stderr: err.message }));
+    child.on("close", (code) => res({ code: code ?? 1, stderr }));
+  });
+}
+
 /**
  * Walk up from `startDir` to find the nearest directory containing `.git` or `.jj`.
  * Returns the VCS type and root path, or null if neither is found.
@@ -74,7 +120,11 @@ async function ensureGitWorktree(
   rootDir: string,
   worktreePath: string,
 ): Promise<void> {
-  if (createdWorktrees.has(worktreePath)) return;
+  if (createdWorktrees.has(worktreePath)) {
+    if (existsSync(worktreePath)) return;
+    // Process-global cache can become stale if the path is later deleted.
+    createdWorktrees.delete(worktreePath);
+  }
   if (existsSync(worktreePath)) {
     createdWorktrees.add(worktreePath);
     return;
@@ -89,8 +139,7 @@ async function ensureGitWorktree(
   }
 
   if (vcs.type === "git") {
-    // Fetch latest and create worktree from origin/main (or HEAD as fallback)
-    // so concurrent worktrees always start from the latest pushed state.
+    // Try to fetch origin first so origin/main can resolve when available.
     await new Promise<void>((res) => {
       const child = nodeSpawn("git", ["fetch", "origin"], {
         cwd: vcs.root,
@@ -100,24 +149,24 @@ async function ensureGitWorktree(
       child.on("error", () => res());
     });
 
-    const result = await new Promise<{ code: number; stderr: string }>(
-      (res) => {
-        const child = nodeSpawn(
-          "git",
-          ["worktree", "add", worktreePath, "origin/main"],
-          { cwd: vcs.root, stdio: ["ignore", "pipe", "pipe"] },
-        );
-        let stderr = "";
-        child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-        child.on("error", (err) =>
-          res({ code: 127, stderr: err.message }),
-        );
-        child.on("close", (code) => res({ code: code ?? 1, stderr }));
-      },
-    );
-    if (result.code !== 0) {
+    let created = false;
+    const failures: string[] = [];
+    for (const ref of ["origin/main", "HEAD"]) {
+      const result = await runGitCommand(vcs.root, [
+        "worktree",
+        "add",
+        worktreePath,
+        ref,
+      ]);
+      if (result.code === 0) {
+        created = true;
+        break;
+      }
+      failures.push(`${ref}: ${result.stderr || `exit ${result.code}`}`);
+    }
+    if (!created) {
       throw new Error(
-        `Failed to create git worktree at ${worktreePath}: ${result.stderr}`,
+        `Failed to create git worktree at ${worktreePath}. Tried origin/main and HEAD. ${failures.join(" | ")}`,
       );
     }
   } else {
@@ -628,6 +677,7 @@ async function executeTask(
   },
   workflowName: string,
   cacheEnabled: boolean,
+  signal?: AbortSignal,
 ) {
   const attempts = await adapter.listAttempts(
     runId,
@@ -692,6 +742,9 @@ async function executeTask(
   }
 
   try {
+    if (signal?.aborted) {
+      throw makeAbortError();
+    }
     if (cacheEnabled) {
       const schemaSig = schemaSignature(desc.outputTable as any);
       const agentSig = desc.agent?.id ?? "agent";
@@ -725,9 +778,10 @@ async function executeTask(
     }
 
     if (!payload) {
+      const effectiveAgent =
+        attemptNo > 1 && desc.fallbackAgent ? desc.fallbackAgent : desc.agent;
       if (desc.agent) {
         // Use fallback agent on retry attempts when available
-        const effectiveAgent = (attemptNo > 0 && desc.fallbackAgent) ? desc.fallbackAgent : desc.agent;
         const result = await runWithToolContext(
           {
             db: adapter,
@@ -772,6 +826,7 @@ async function executeTask(
             };
             return (effectiveAgent as any).generate({
               options: undefined as any,
+              abortSignal: signal,
               prompt: effectivePrompt,
               timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
               onStdout: (text: string) => emitOutput(text, "stdout"),
@@ -934,8 +989,9 @@ async function executeTask(
               ``,
               `Output ONLY the JSON object, nothing else.`,
             ].join("\n");
-            const retryResult = await desc.agent.generate({
+            const retryResult = await (effectiveAgent as any).generate({
               options: undefined as any,
+              abortSignal: signal,
               prompt: jsonPrompt,
               timeout: { totalMs: Math.max(desc.timeoutMs ?? 300000, 300000) },
             });
@@ -998,15 +1054,26 @@ async function executeTask(
           payload = output;
         }
       } else if (desc.computeFn) {
-        const computePromise = Promise.resolve(desc.computeFn());
+        const computePromise = Promise.resolve().then(() => desc.computeFn!());
+        const races: Array<Promise<unknown>> = [computePromise];
         if (desc.timeoutMs) {
-          const timeout = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Compute callback timed out after ${desc.timeoutMs}ms`)), desc.timeoutMs!),
+          races.push(
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      `Compute callback timed out after ${desc.timeoutMs}ms`,
+                    ),
+                  ),
+                desc.timeoutMs!,
+              ),
+            ),
           );
-          payload = await Promise.race([computePromise, timeout]);
-        } else {
-          payload = await computePromise;
         }
+        const abort = abortPromise(signal);
+        if (abort) races.push(abort);
+        payload = await Promise.race(races);
       } else {
         payload = desc.staticPayload;
       }
@@ -1070,6 +1137,7 @@ async function executeTask(
 
         const schemaRetryResult = await (desc.agent as any).generate({
           options: undefined as any,
+          abortSignal: signal,
           prompt: schemaRetryPrompt,
           timeout: { totalMs: Math.max(desc.timeoutMs ?? 300000, 300000) },
         });
@@ -1175,6 +1243,34 @@ async function executeTask(
       timestampMs: nowMs(),
     });
   } catch (err) {
+    if (signal?.aborted || isAbortError(err)) {
+      await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
+        state: "cancelled",
+        finishedAtMs: nowMs(),
+        errorJson: JSON.stringify(errorToJson(err)),
+        responseText,
+      });
+      await adapter.insertNode({
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        state: "cancelled",
+        lastAttempt: attemptNo,
+        updatedAtMs: nowMs(),
+        outputTable: desc.outputTableName,
+        label: desc.label ?? null,
+      });
+      await eventBus.emitEventWithPersist({
+        type: "NodeCancelled",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        reason: "aborted",
+        timestampMs: nowMs(),
+      });
+      return;
+    }
     await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
       state: "failed",
       finishedAtMs: nowMs(),
@@ -1672,6 +1768,7 @@ export async function runWorkflow<Schema>(
             toolConfig,
             workflowName,
             cacheEnabled,
+            opts.signal,
           ),
         ),
       );

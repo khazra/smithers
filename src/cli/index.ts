@@ -8,7 +8,7 @@ import { loadInput, loadOutputs } from "../db/snapshot";
 import { ensureSmithersTables } from "../db/ensure";
 import { SmithersDb } from "../db/adapter";
 import { buildContext } from "../context";
-import type { SmithersWorkflow } from "../types";
+import type { SmithersWorkflow } from "../SmithersWorkflow";
 import { revertToAttempt } from "../revert";
 
 async function loadWorkflow(path: string): Promise<SmithersWorkflow<any>> {

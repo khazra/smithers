@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import type { SmithersEvent } from "./types";
+import type { SmithersEvent } from "./SmithersEvent";
 
 export class EventBus extends EventEmitter {
   private seq = 0;

@@ -1,4 +1,4 @@
-import type { SmithersEvent } from "../types";
+import type { SmithersEvent } from "../SmithersEvent";
 
 const DEFAULT_BASE = "http://127.0.0.1:7331";
 

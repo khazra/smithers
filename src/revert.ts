@@ -1,5 +1,5 @@
 import type { SmithersDb } from "./db/adapter";
-import type { SmithersEvent } from "./types";
+import type { SmithersEvent } from "./SmithersEvent";
 import { revertToJjPointer } from "./vcs/jj";
 import { nowMs } from "./utils/time";
 

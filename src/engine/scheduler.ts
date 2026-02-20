@@ -1,4 +1,5 @@
-import type { XmlNode, TaskDescriptor } from "../types";
+import type { XmlNode } from "../XmlNode";
+import type { TaskDescriptor } from "../TaskDescriptor";
 import { resolveStableId } from "../utils/tree-ids";
 import { parseBool, parseNum } from "../utils/parse";
 

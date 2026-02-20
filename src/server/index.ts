@@ -3,8 +3,8 @@ import { pathToFileURL } from "node:url";
 import { resolve, dirname, sep, basename } from "node:path";
 import { runWorkflow } from "../engine";
 import { newRunId } from "../utils/ids";
-import type { SmithersWorkflow } from "../types";
-import type { SmithersEvent } from "../types";
+import type { SmithersWorkflow } from "../SmithersWorkflow";
+import type { SmithersEvent } from "../SmithersEvent";
 import { SmithersDb } from "../db/adapter";
 import { ensureSmithersTables } from "../db/ensure";
 import { approveNode, denyNode } from "../engine/approvals";
@@ -752,6 +752,11 @@ export function startServer(opts: ServerOptions = {}) {
           return sendJson(res, 404, {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });
+        const run = await adapter.getRun(runId);
+        if (!run)
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
         await approveNode(
           adapter,
           runId,
@@ -772,6 +777,11 @@ export function startServer(opts: ServerOptions = {}) {
         const body = await readBody(req, maxBodyBytes);
         const adapter = adapterForRun(runId);
         if (!adapter)
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
+        const run = await adapter.getRun(runId);
+        if (!run)
           return sendJson(res, 404, {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });

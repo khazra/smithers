@@ -1,4 +1,5 @@
-import type { XmlNode, XmlElement, TaskDescriptor } from "../types";
+import type { XmlNode, XmlElement } from "../XmlNode";
+import type { TaskDescriptor } from "../TaskDescriptor";
 import { resolveStableId } from "../utils/tree-ids";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import {

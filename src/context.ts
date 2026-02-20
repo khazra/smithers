@@ -1,5 +1,6 @@
 import React from "react";
-import type { SmithersCtx, OutputKey } from "./types";
+import type { SmithersCtx } from "./SmithersCtx";
+import type { OutputKey } from "./OutputKey";
 
 export type OutputSnapshot = {
   [tableName: string]: Array<any>;
