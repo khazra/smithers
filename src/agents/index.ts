@@ -1,5 +1,7 @@
 export { BaseCliAgent } from "./BaseCliAgent";
 
+export { AmpAgent } from "./AmpAgent";
+
 export { ClaudeCodeAgent } from "./ClaudeCodeAgent";
 
 export { CodexAgent } from "./CodexAgent";
