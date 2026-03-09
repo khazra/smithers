@@ -97,6 +97,7 @@
         "group": "Integrations",
         "pages": [
           "integrations/tools",
+          "integrations/linear",
           "integrations/cli-agents",
           "integrations/server",
           "integrations/pi-plugin"

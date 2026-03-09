@@ -1,0 +1,238 @@
+---
+title: Linear Integration
+description: Connect Smithers workflows to Linear for automated issue tracking, status updates, and agent-powered ticket processing.
+---
+
+Smithers includes a built-in Linear integration that lets workflows read issues, update statuses, post comments, and give agents direct access to your Linear workspace through AI SDK tools.
+
+## Setup
+
+Set the `LINEAR_API_KEY` environment variable with a [Linear API key](https://linear.app/settings/api):
+
+```bash
+export LINEAR_API_KEY=lin_api_...
+```
+
+## Import
+
+```ts
+import { useLinear, linearTools, getLinearClient } from "smithers-orchestrator";
+// or from the dedicated subpath:
+import { useLinear, linearTools } from "smithers-orchestrator/linear";
+```
+
+## useLinear
+
+A hook that returns typed operations for interacting with Linear. All return values are plain serializable objects (not SDK lazy models), safe to pass between tasks.
+
+```ts
+const linear = useLinear();
+```
+
+### listIssues
+
+Fetch issues with optional filters.
+
+```ts
+const issues = await linear.listIssues({
+  teamId: "team-uuid",
+  stateType: "unstarted",   // "unstarted" | "started" | "completed" | "cancelled"
+  limit: 20,
+  labels: ["bug"],
+});
+```
+
+**Parameters:**
+
+| Field | Type | Description |
+|---|---|---|
+| `teamId` | `string?` | Filter by team ID |
+| `assigneeId` | `string?` | Filter by assignee ID |
+| `stateType` | `string?` | Filter by state type |
+| `limit` | `number?` | Max results (default 50) |
+| `labels` | `string[]?` | Filter by label names |
+
+**Returns:** `LinearIssue[]`
+
+### getIssue
+
+Fetch a single issue by ID or identifier.
+
+```ts
+const issue = await linear.getIssue("JJH-42");
+```
+
+### updateIssueState
+
+Move an issue to a new state.
+
+```ts
+await linear.updateIssueState(issue.id, doneStateId);
+```
+
+### addComment
+
+Post a markdown comment on an issue.
+
+```ts
+const commentId = await linear.addComment(issue.id, "## Done\nShipped in v1.2.0");
+```
+
+### listComments
+
+Fetch all comments on an issue.
+
+```ts
+const comments = await linear.listComments(issue.id);
+```
+
+### listTeams
+
+List all teams in the workspace.
+
+```ts
+const teams = await linear.listTeams();
+const team = teams.find(t => t.key === "ENG");
+```
+
+### listProjects
+
+List all projects in the workspace.
+
+```ts
+const projects = await linear.listProjects();
+```
+
+### listIssueStatuses
+
+List all workflow states for a team.
+
+```ts
+const statuses = await linear.listIssueStatuses(team.id);
+const inProgress = statuses.find(s => s.name === "In Progress");
+```
+
+## linearTools
+
+Pre-built AI SDK tools that agents can use to interact with Linear directly. Pass them to any agent's `tools` option.
+
+```ts
+import { ToolLoopAgent as Agent } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { linearTools } from "smithers-orchestrator/linear";
+import { read, grep } from "smithers-orchestrator/tools";
+
+const triageAgent = new Agent({
+  model: anthropic("claude-sonnet-4-20250514"),
+  tools: { ...linearTools, read, grep },
+  instructions: "You are a ticket triage agent. Read issues and classify them.",
+});
+```
+
+### Available tools
+
+| Tool | Description |
+|---|---|
+| `linearListIssues` | List issues with optional filters |
+| `linearGetIssue` | Get a single issue by ID or identifier |
+| `linearUpdateIssue` | Update an issue's state |
+| `linearAddComment` | Add a comment to an issue |
+| `linearListTeams` | List all workspace teams |
+
+## Types
+
+All types are plain serializable objects:
+
+```ts
+import type {
+  LinearIssue,
+  LinearTeam,
+  LinearProject,
+  LinearComment,
+  LinearIssueStatus,
+  ListIssuesParams,
+} from "smithers-orchestrator/linear";
+```
+
+### LinearIssue
+
+```ts
+type LinearIssue = {
+  id: string;
+  identifier: string;         // e.g. "ENG-42"
+  title: string;
+  description: string | null;
+  priority: number;            // 0=None, 1=Urgent, 2=High, 3=Normal, 4=Low
+  priorityLabel: string;
+  state: { id: string; name: string; type: string } | null;
+  assignee: { id: string; name: string; email: string } | null;
+  labels: { id: string; name: string }[];
+  project: { id: string; name: string } | null;
+  createdAt: string;           // ISO-8601
+  updatedAt: string;           // ISO-8601
+  url: string;
+};
+```
+
+## Example: Ticket Processing Workflow
+
+A complete workflow that processes Linear tickets through research, implementation, and review stages:
+
+```tsx
+import { createSmithers, Sequence, Ralph, Parallel } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
+import { useLinear } from "smithers-orchestrator/linear";
+import { read, grep, bash } from "smithers-orchestrator/tools";
+import { z } from "zod";
+
+const researchSchema = z.object({
+  summary: z.string(),
+  relevantFiles: z.array(z.string()),
+  complexity: z.enum(["low", "medium", "high"]),
+});
+
+const resultSchema = z.object({
+  ticketId: z.string(),
+  success: z.boolean(),
+});
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  research: researchSchema,
+  result: resultSchema,
+});
+
+const researcher = new ClaudeCodeAgent({
+  model: "claude-opus-4-20250514",
+  systemPrompt: "Research the ticket and find relevant code.",
+});
+
+export default smithers((ctx) => (
+  <Workflow name="ticket-processor">
+    <Sequence>
+      <Task id="research" output={outputs.research} agent={researcher}>
+        {`Research ticket: ${ctx.input.title}\n${ctx.input.description}`}
+      </Task>
+      <Task id="update-linear" output={outputs.result}>
+        {async () => {
+          const linear = useLinear();
+          await linear.addComment(ctx.input.issueId, "Research complete.");
+          return { ticketId: ctx.input.ticketId, success: true };
+        }}
+      </Task>
+    </Sequence>
+  </Workflow>
+));
+```
+
+## getLinearClient
+
+For advanced use cases, access the underlying `@linear/sdk` client directly:
+
+```ts
+import { getLinearClient } from "smithers-orchestrator/linear";
+
+const client = getLinearClient();
+const viewer = await client.viewer;
+```
+
+The client is a lazy singleton — it's created once on first access using `LINEAR_API_KEY` and cached for the process lifetime. Call `resetLinearClient()` to clear the cache (useful in tests).
