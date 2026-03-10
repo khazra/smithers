@@ -16,7 +16,7 @@ import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   code: z.object({
     source: z.string(),
     language: z.string(),
@@ -57,14 +57,14 @@ export default smithers((ctx) => {
           onMaxReached="return-last"
         >
           <Sequence>
-            <Task id="write" output="code" agent={coder}>
+            <Task id="write" output={outputs.code} agent={coder}>
               Write a TypeScript function that debounces an input function.
               {latestReview
                 ? ` Revise based on this feedback: ${latestReview.feedback}`
                 : ""}
             </Task>
 
-            <Task id="review" output="review" agent={reviewer}>
+            <Task id="review" output={outputs.review} agent={reviewer}>
               Review this code for correctness and edge cases:
               {"\n\n```" + (latestCode?.language ?? "ts") + "\n"}
               {latestCode?.source ?? "// no code yet"}
@@ -74,7 +74,7 @@ export default smithers((ctx) => {
         </Ralph>
 
         {/* After the loop ends, emit the final result */}
-        <Task id="final" output="finalOutput">
+        <Task id="final" output={outputs.finalOutput}>
           {{
             source: latestCode?.source ?? "",
             iterations: ctx.iterationCount("code", "write"),
@@ -124,7 +124,7 @@ Example output showing two iterations before approval:
 In the example above, `ctx.outputMaybe("review", { nodeId: "review" })` takes a **schema key** as the first argument -- that is, the key from the object you passed to `createSmithers()`. This is `"review"` because the schema was defined as:
 
 ```tsx
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   code: z.object({ ... }),     // schema key: "code"
   review: z.object({ ... }),   // schema key: "review"
   finalOutput: z.object({ ... }), // schema key: "finalOutput"

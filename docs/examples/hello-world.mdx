@@ -17,7 +17,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
 // 1. Define your schema
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   greeting: z.object({
     message: z.string(),
   }),
@@ -33,7 +33,7 @@ const greeter = new Agent({
 export default smithers((ctx) => (
   <Workflow name="hello-world">
     <Sequence>
-      <Task id="greet" output="greeting" agent={greeter}>
+      <Task id="greet" output={outputs.greeting} agent={greeter}>
         Generate a warm greeting for someone named Alice.
       </Task>
     </Sequence>

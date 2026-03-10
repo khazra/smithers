@@ -17,7 +17,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { tools } from "smithers-orchestrator";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   searchResult: z.object({
     matches: z.array(
       z.object({
@@ -44,7 +44,7 @@ export default smithers((ctx) => (
     <Sequence>
       <Task
         id="search"
-        output="searchResult"
+        output={outputs.searchResult}
         agent={codeSearchAgent}
         timeoutMs={60_000}
         retries={2}

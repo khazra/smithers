@@ -16,7 +16,7 @@ import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   analysis: z.object({
     summary: z.string(),
     complexity: z.enum(["low", "high"]),
@@ -53,7 +53,7 @@ export default smithers((ctx) => {
     <Workflow name="dynamic-plan">
       <Sequence>
         {/* Step 1: Analyze the task */}
-        <Task id="analyze" output="analysis" agent={analyzer}>
+        <Task id="analyze" output={outputs.analysis} agent={analyzer}>
           Analyze this task and classify its complexity: "Refactor the authentication
           module to support OAuth2 and SAML providers."
         </Task>
@@ -63,10 +63,10 @@ export default smithers((ctx) => {
           if={isComplex}
           then={
             <Sequence>
-              <Task id="plan" output="plan" agent={planner}>
+              <Task id="plan" output={outputs.plan} agent={planner}>
                 Create a step-by-step plan for: {analysis?.summary}
               </Task>
-              <Task id="implement" output="result" agent={implementer}>
+              <Task id="implement" output={outputs.result} agent={implementer}>
                 Execute these steps:{" "}
                 {ctx
                   .outputMaybe("plan", { nodeId: "plan" })
@@ -75,7 +75,7 @@ export default smithers((ctx) => {
             </Sequence>
           }
           else={
-            <Task id="implement" output="result" agent={implementer}>
+            <Task id="implement" output={outputs.result} agent={implementer}>
               Quick implementation for: {analysis?.summary}
             </Task>
           }

@@ -29,7 +29,7 @@ const reportSchema = z.object({
 
 // 2. Create a Smithers instance -- this auto-creates the SQLite
 //    database and Drizzle tables from your schemas
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   research: researchSchema,
   report: reportSchema,
 });
@@ -49,13 +49,13 @@ const writer = new Agent({
 //    by default (top to bottom)
 export default smithers((ctx) => (
   <Workflow name="research-report">
-    <Task id="research" output="research" outputSchema={researchSchema} agent={researcher}>
+    <Task id="research" output={outputs.research} agent={researcher}>
       {`Research this topic and provide a summary with key points: ${ctx.input.topic}`}
     </Task>
-    <Task id="report" output="report" outputSchema={reportSchema} agent={writer}>
+    <Task id="report" output={outputs.report} agent={writer}>
       {`Write a short report based on this research:
-Summary: ${ctx.output("research", { nodeId: "research" }).summary}
-Key Points: ${JSON.stringify(ctx.output("research", { nodeId: "research" }).keyPoints)}`}
+Summary: ${ctx.outputMaybe("research", { nodeId: "research" })?.summary ?? ""}
+Key Points: ${JSON.stringify(ctx.outputMaybe("research", { nodeId: "research" })?.keyPoints ?? [])}`}
     </Task>
   </Workflow>
 ));
@@ -64,10 +64,10 @@ Key Points: ${JSON.stringify(ctx.output("research", { nodeId: "research" }).keyP
 There is a lot happening here, so let's break it down:
 
 - **Zod schemas** define the shape of each task's output. Smithers validates agent responses against these schemas and auto-retries on validation failures.
-- **`createSmithers()`** takes a record of named schemas and returns a `Workflow` component, a `smithers()` builder function, and a configured database. You never touch SQLite or Drizzle directly.
+- **`createSmithers()`** takes a record of named schemas and returns a `Workflow` component, a `smithers()` builder function, an `outputs` object with typed Zod schema references, and a configured database. You never touch SQLite or Drizzle directly.
 - **`smithers()`** wraps your JSX build function into a `SmithersWorkflow` object that the engine can execute. The `ctx` parameter provides access to the workflow input and completed task outputs.
 - **`ctx.input`** is the input object you pass at run time. Here it expects `{ topic: string }`.
-- **`ctx.output("research", { nodeId: "research" })`** retrieves the persisted output of the `research` task. This call throws if the task has not completed yet, which is safe because `<Workflow>` sequences its children by default -- `report` only runs after `research` finishes.
+- **`ctx.outputMaybe("research", { nodeId: "research" })`** retrieves the persisted output of the `research` task, or `undefined` if it has not completed yet. Since the JSX tree is rendered before tasks execute, always use `outputMaybe` with optional chaining (`?.`) for downstream task prompts. `<Workflow>` sequences its children by default, so `report` only runs after `research` finishes -- by that point, the tree re-renders and the value is available.
 
 ## Step 2: Create the Runner
 
@@ -141,11 +141,11 @@ When you called `runWorkflow`, Smithers executed the following loop:
 
 1. **Render** -- The JSX tree is rendered using a custom React reconciler. Smithers identifies two tasks: `research` (ordinal 0) and `report` (ordinal 1). Since they are direct children of `<Workflow>`, they form an implicit sequence.
 
-2. **Schedule** -- The engine walks the plan tree and determines that `research` is runnable (no dependencies) and `report` is blocked (it depends on `research` completing because it reads `ctx.output("research", ...)`).
+2. **Schedule** -- The engine walks the plan tree and determines that `research` is runnable (no dependencies) and `report` is blocked (it depends on `research` completing). On this first render, `ctx.outputMaybe("research", ...)` returns `undefined`, so the `report` task's prompt uses the fallback values.
 
 3. **Execute `research`** -- The researcher agent is called with the prompt. Its response is parsed as JSON, validated against `researchSchema`, and written to the `research` table in SQLite.
 
-4. **Re-render** -- The tree re-renders. This time `ctx.output("research", { nodeId: "research" })` returns the persisted row, so the `report` task's prompt is fully resolved.
+4. **Re-render** -- The tree re-renders. This time `ctx.outputMaybe("research", { nodeId: "research" })` returns the persisted row, so the `report` task's prompt is fully resolved.
 
 5. **Execute `report`** -- The writer agent is called. Its output is validated against `reportSchema` and persisted.
 
@@ -166,12 +166,12 @@ The engine would detect that `research` already has a valid output row, skip it,
 | **Workflow** | A JSX tree that defines the execution graph. Re-renders after each task completes. |
 | **Task** | A single unit of work (AI agent call or static data). Identified by its `id` prop. |
 | **Output** | A Zod-validated JSON object persisted to SQLite. Keyed by `(runId, nodeId, iteration)`. |
-| **Context (`ctx`)** | Provides access to `input`, completed `output` rows, `runId`, and `iteration`. Passed to the `smithers()` build function. |
+| **Context (`ctx`)** | Provides access to `input`, completed output rows via `outputMaybe`/`latest`, `runId`, and `iteration`. Passed to the `smithers()` build function. |
 | **Sequence** | Default within `<Workflow>`. Tasks run top-to-bottom. Use `<Sequence>` explicitly for nested groups. |
 | **Parallel** | Tasks inside `<Parallel>` run concurrently up to `maxConcurrency`. |
 | **Ralph** | A loop component. Re-runs its children with an incrementing `iteration` until `until` is true or `maxIterations` is reached. |
 | **Resume** | Re-running a workflow with the same `runId`. Completed tasks are skipped automatically. |
-| **Schema Registry** | When you pass Zod schemas to `createSmithers()`, the framework auto-creates SQLite tables and resolves string output keys (e.g., `output="research"`) to their backing tables. |
+| **Schema Registry** | When you pass Zod schemas to `createSmithers()`, the framework auto-creates SQLite tables and returns an `outputs` object. Use `output={outputs.research}` to bind a task to its schema. |
 
 ## Next Steps
 

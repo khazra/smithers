@@ -16,7 +16,7 @@ import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   draft: z.object({
     title: z.string(),
     content: z.string(),
@@ -46,7 +46,7 @@ export default smithers((ctx) => {
     <Workflow name="approval-gate">
       <Sequence>
         {/* Step 1: Agent writes a draft */}
-        <Task id="write-draft" output="draft" agent={writer}>
+        <Task id="write-draft" output={outputs.draft} agent={writer}>
           Write a blog post about deterministic AI workflows and why resumability
           matters for production systems.
         </Task>
@@ -54,7 +54,7 @@ export default smithers((ctx) => {
         {/* Step 2: Human must approve before publishing */}
         <Task
           id="publish"
-          output="published"
+          output={outputs.published}
           agent={publisher}
           needsApproval
           label="Publish blog post"
