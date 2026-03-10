@@ -3,6 +3,7 @@ import { getTableColumns } from "drizzle-orm/utils";
 import type { AnyColumn, Table } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
+import { withSqliteWriteRetry } from "./write-retry";
 
 export type OutputKey = { runId: string; nodeId: string; iteration?: number };
 
@@ -64,13 +65,17 @@ export async function upsertOutputRow(
     ? [cols.runId, cols.nodeId, cols.iteration]
     : [cols.runId, cols.nodeId];
 
-  await db
-    .insert(table as any)
-    .values(values)
-    .onConflictDoUpdate({
-      target,
-      set: values,
-    });
+  await withSqliteWriteRetry(
+    () =>
+      db
+        .insert(table as any)
+        .values(values)
+        .onConflictDoUpdate({
+          target,
+          set: values,
+        }),
+    { label: `upsert output ${(table as any)["_"]?.name ?? "output"}` },
+  );
 }
 
 export function validateOutput(

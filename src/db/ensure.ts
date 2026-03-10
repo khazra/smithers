@@ -13,10 +13,17 @@ export function ensureSmithersTables(db: BunSQLiteDatabase<any>): void {
       run_id TEXT PRIMARY KEY,
       workflow_name TEXT NOT NULL,
       workflow_path TEXT,
+      workflow_hash TEXT,
       status TEXT NOT NULL,
       created_at_ms INTEGER NOT NULL,
       started_at_ms INTEGER,
       finished_at_ms INTEGER,
+      heartbeat_at_ms INTEGER,
+      runtime_owner_id TEXT,
+      cancel_requested_at_ms INTEGER,
+      vcs_type TEXT,
+      vcs_root TEXT,
+      vcs_revision TEXT,
       error_json TEXT,
       config_json TEXT
     );
@@ -128,5 +135,26 @@ export function ensureSmithersTables(db: BunSQLiteDatabase<any>): void {
   } catch {}
   try {
     client.exec(`ALTER TABLE _smithers_attempts ADD COLUMN jj_cwd TEXT`);
+  } catch {}
+  try {
+    client.exec(`ALTER TABLE _smithers_runs ADD COLUMN workflow_hash TEXT`);
+  } catch {}
+  try {
+    client.exec(`ALTER TABLE _smithers_runs ADD COLUMN heartbeat_at_ms INTEGER`);
+  } catch {}
+  try {
+    client.exec(`ALTER TABLE _smithers_runs ADD COLUMN runtime_owner_id TEXT`);
+  } catch {}
+  try {
+    client.exec(`ALTER TABLE _smithers_runs ADD COLUMN cancel_requested_at_ms INTEGER`);
+  } catch {}
+  try {
+    client.exec(`ALTER TABLE _smithers_runs ADD COLUMN vcs_type TEXT`);
+  } catch {}
+  try {
+    client.exec(`ALTER TABLE _smithers_runs ADD COLUMN vcs_root TEXT`);
+  } catch {}
+  try {
+    client.exec(`ALTER TABLE _smithers_runs ADD COLUMN vcs_revision TEXT`);
   } catch {}
 }
