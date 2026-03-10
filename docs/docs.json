@@ -111,7 +111,39 @@
           "examples/ralph-loop",
           "examples/multi-agent-review",
           "examples/approval-gate",
-          "examples/tools-agent"
+          "examples/tools-agent",
+          {
+            "group": "Ghost Docs: workflows/",
+            "pages": [
+              "examples/workflow-hello",
+              "examples/workflow-approval",
+              "examples/workflow-quickstart"
+            ]
+          },
+          {
+            "group": "Ghost Docs: worktree-feature/",
+            "pages": [
+              "examples/worktree-feature-workflow",
+              "examples/worktree-feature-schemas",
+              "examples/worktree-feature-prompts",
+              "examples/worktree-feature-run-sh"
+            ]
+          },
+          {
+            "group": "Ghost Docs: Scripts & Config",
+            "pages": [
+              "examples/generate-llms-txt",
+              "examples/ci-workflow",
+              "examples/agents-md"
+            ]
+          },
+          {
+            "group": "Ghost Docs: Claude Code Plugins",
+            "pages": [
+              "examples/claude-plugin-skill",
+              "examples/claude-plugin-orchestrator"
+            ]
+          }
         ]
       },
       {

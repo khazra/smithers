@@ -1,0 +1,79 @@
+---
+title: "Ghost: scripts/generate-llms-txt.ts"
+description: "Example from scripts/generate-llms-txt.ts — A utility script that generates llms-full.txt context files from all MDX documentation pages."
+---
+
+# scripts/generate-llms-txt.ts
+
+<Note>
+**Ghost doc** — This is a real utility script found at `scripts/generate-llms-txt.ts` in the Smithers repository. It generates the `llms-full.txt` file used to give LLMs full documentation context.
+</Note>
+
+## Source
+
+```ts
+// scripts/generate-llms-txt.ts
+#!/usr/bin/env bun
+import { readFileSync, writeFileSync } from "fs";
+
+const pages = [
+  { path: "docs/introduction.mdx", url: "https://smithers.sh/introduction" },
+  { path: "docs/installation.mdx", url: "https://smithers.sh/installation" },
+  { path: "docs/quickstart.mdx", url: "https://smithers.sh/quickstart" },
+  // ... all 40 documentation pages
+  { path: "docs/reference/types.mdx", url: "https://smithers.sh/reference/types" },
+];
+
+function stripFrontmatter(content: string) {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (match) {
+    const frontmatter = match[1];
+    const body = match[2];
+    const titleMatch = frontmatter.match(/title:\s*["']?(.+?)["']?\s*$/m);
+    const descMatch = frontmatter.match(/description:\s*["']?(.+?)["']?\s*$/m);
+    return {
+      title: titleMatch?.[1]?.trim().replace(/^["']|["']$/g, "") ?? "",
+      description: descMatch?.[1]?.trim().replace(/^["']|["']$/g, "") ?? "",
+      body: body.trim(),
+    };
+  }
+  return { title: "", description: "", body: content.trim() };
+}
+
+function cleanMdx(body: string) {
+  return body
+    .replace(/<Warning>\s*/g, "> **Warning:** ")
+    .replace(/<\/Warning>/g, "")
+    .replace(/<Tip>\s*/g, "> **Tip:** ")
+    .replace(/<\/Tip>/g, "")
+    .replace(/<Note>\s*/g, "> **Note:** ")
+    .replace(/<\/Note>/g, "");
+}
+
+let output = `# Smithers\n\n> Deterministic, resumable AI workflow orchestration using JSX.\n\n`;
+
+for (const page of pages) {
+  const content = readFileSync(page.path, "utf-8");
+  const { title, description, body } = stripFrontmatter(content);
+  const cleaned = cleanMdx(body);
+
+  output += `---\n\n## ${title}\n\n`;
+  if (description) output += `> ${description}\n`;
+  output += `> Source: ${page.url}\n\n${cleaned}\n\n`;
+}
+
+writeFileSync("docs/llms-full.txt", output);
+console.log(`Generated docs/llms-full.txt (${output.length} chars)`);
+```
+
+## Running
+
+```bash
+bun scripts/generate-llms-txt.ts
+```
+
+## What This Demonstrates
+
+- **llms.txt convention** — Generates a single text file containing all documentation, following the `llms.txt` standard for giving AI models project context.
+- **MDX to Markdown conversion** — Strips YAML frontmatter and converts MDX components (`<Warning>`, `<Tip>`, `<Note>`) to markdown blockquotes.
+- **Source URL attribution** — Each section includes a source URL back to the live docs page.
