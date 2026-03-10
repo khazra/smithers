@@ -3,7 +3,7 @@ title: Resumability
 description: How Smithers persists state to SQLite and resumes interrupted runs deterministically.
 ---
 
-Smithers persists all run state to SQLite. When a process crashes, times out, or is cancelled, you can resume the exact same run and Smithers will skip tasks that already wrote valid output rows. This guide explains how resumability works, what gets skipped, and how to use it from the CLI and programmatically.
+Smithers persists durable run state to SQLite. When a process crashes, times out, or is cancelled, you can resume the exact same run and Smithers will skip tasks that already wrote valid output rows. This guide explains how resumability works, what gets skipped, and how to use it from the CLI and programmatically.
 
 ## How It Works
 
@@ -12,9 +12,10 @@ Every task output is written to SQLite keyed by `(runId, nodeId, iteration)`. Wh
 The resume flow:
 
 1. **Load existing state** -- Smithers reads `_smithers_runs`, `_smithers_nodes`, and `_smithers_attempts` for the given `runId`.
-2. **Stale attempt cleanup** -- Any in-progress attempts older than 15 minutes are automatically cancelled. This prevents zombie tasks from blocking forward progress. The associated nodes are reset to `pending`.
-3. **Re-render** -- The JSX tree is rendered with the current `ctx`, which includes all previously persisted outputs. Completed tasks are naturally skipped because their output exists.
-4. **Resume execution** -- The engine schedules and executes any remaining runnable tasks.
+2. **Metadata check** -- The stored workflow path, workflow file hash, and VCS metadata are compared against the current environment. Resume fails fast if they changed.
+3. **Stale attempt cleanup** -- Any in-progress attempts older than 15 minutes are automatically cancelled. This prevents zombie tasks from blocking forward progress. The associated nodes are reset to `pending`.
+4. **Re-render** -- The JSX tree is rendered with the current `ctx`, which includes all previously persisted outputs. Completed tasks are naturally skipped because their output exists.
+5. **Resume execution** -- The engine schedules and executes any remaining runnable tasks.
 
 ## Deterministic Node IDs
 
@@ -130,7 +131,7 @@ bunx smithers resume workflow.tsx --run-id run-2
 If a task failed because of a bug in your workflow code:
 
 1. Fix the code in your workflow file.
-2. Resume the run. The failed task's node may be re-evaluated if the retry count changed, or you can start a fresh run.
+2. Start a fresh run, or resume only after restoring the original workflow file and repository state recorded in SQLite.
 
 ```bash
 # Original run failed at "analyze" because of a prompt bug
@@ -138,7 +139,7 @@ If a task failed because of a bug in your workflow code:
 bunx smithers run workflow.tsx --input '{"repo": "/my-project"}'
 ```
 
-Note: Resuming a run with changed workflow code is supported but may produce unexpected results if task IDs changed or the execution graph is significantly different. For major code changes, prefer starting a fresh run.
+Note: Resuming a run with changed workflow code or a different VCS revision is rejected. Smithers stores workflow and repository metadata in `_smithers_runs` and requires them to match so resume stays deterministic.
 
 ## Database Tables
 

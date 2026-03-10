@@ -499,7 +499,7 @@ Quick reference table of all event types and their extra fields (beyond `type`, 
 Events are persisted in two places:
 
 1. **SQLite database** -- Every event is inserted into the `_smithers_events` table with a sequential `seq` number, enabling replay and querying.
-2. **NDJSON log file** -- Each event is appended as a JSON line to `stream.ndjson` in the run's log directory.
+2. **NDJSON log file** -- Each event is appended to `stream.ndjson` in the run's log directory on a best-effort basis. SQLite remains the source of truth if file logging fails.
 
 Both persistence mechanisms happen asynchronously. The `onProgress` callback fires synchronously on the event bus before persistence.
 

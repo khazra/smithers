@@ -13,7 +13,7 @@
 * Supports subscriptions
 * Hot-reloads workflow code on file save (prompts, config, components) without restarting
 
-There is no hidden in-memory state. Every task result is stored as:
+Durable execution checkpoints live in SQLite. The runtime still keeps transient process-local helpers such as file watchers, abort controllers, and active server records in memory. Every task result is stored as:
 
 ```
 (runId, nodeId, iteration) → validated output row

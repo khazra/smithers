@@ -55,7 +55,7 @@ const result = await runWorkflow(workflow, {
 
 **Deterministic execution.** The workflow tree is rendered, tasks are identified, executed, and their outputs are persisted. Then the tree re-renders with updated context, revealing newly unblocked tasks. The same inputs always produce the same execution graph.
 
-**Durable SQLite state.** Every task output is written to SQLite (via Drizzle ORM) keyed by `(runId, nodeId, iteration)`. There is no in-memory state to lose. If the process crashes, resume exactly where you left off.
+**Durable SQLite state.** Every task output is written to SQLite (via Drizzle ORM) keyed by `(runId, nodeId, iteration)`. Durable checkpoints, attempts, approvals, events, and frames are persisted there so a crashed process can resume from the last committed state.
 
 **Resumable runs.** Call `runWorkflow` with `resume: true` and the same `runId`. Smithers skips completed tasks and picks up from the last checkpoint.
 

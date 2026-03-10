@@ -131,6 +131,7 @@ const result = await runWorkflow(workflow, {
 When resuming:
 
 - The original input row is loaded from the database. You do not need to provide `input` data again (pass an empty object).
+- The stored workflow path, workflow file hash, and VCS metadata must still match the current environment.
 - Stale in-progress attempts older than 15 minutes are automatically cancelled and retried.
 - Tasks with valid persisted outputs are skipped.
 

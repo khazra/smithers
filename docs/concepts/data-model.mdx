@@ -3,7 +3,7 @@ title: Data Model
 description: How Smithers stores workflow state in SQLite using Drizzle ORM.
 ---
 
-Smithers persists all workflow state -- inputs, outputs, execution metadata, approvals, and cache -- in a single SQLite database managed through Drizzle ORM. There are two ways to set up the data layer depending on how much control you need.
+Smithers persists its durable workflow state -- inputs, outputs, execution metadata, approvals, events, frames, and cache -- in a single SQLite database managed through Drizzle ORM. The process still keeps transient runtime helpers in memory while a run is active. There are two ways to set up the data layer depending on how much control you need.
 
 ## Two API Modes
 
