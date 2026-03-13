@@ -38,9 +38,13 @@ import { getJjPointer } from "../vcs/jj";
 import { z } from "zod";
 import { eq, getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
+import { Effect } from "effect";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { fromPromise } from "../effect/interop";
+import { logDebug, logError, logInfo, logWarning } from "../effect/logging";
+import { runPromise } from "../effect/runtime";
 import { HotWorkflowController } from "../hot/HotWorkflowController";
 import type { HotReloadOptions } from "../RunOptions";
 import { spawn as nodeSpawn } from "node:child_process";
@@ -451,9 +455,12 @@ function startRunSupervisor(
   const heartbeat = setInterval(() => {
     if (closed || controller.signal.aborted) return;
     void adapter.heartbeatRun(runId, runtimeOwnerId, nowMs()).catch((error) => {
-      console.warn(
-        `[smithers] failed to persist run heartbeat: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      logWarning("failed to persist run heartbeat", {
+        runId,
+        runtimeOwnerId,
+        error:
+          error instanceof Error ? error.message : String(error),
+      }, "engine:heartbeat");
     });
   }, RUN_HEARTBEAT_MS);
 
@@ -462,13 +469,21 @@ function startRunSupervisor(
       try {
         const run = await adapter.getRun(runId);
         if (run?.cancelRequestedAtMs) {
+          logInfo("detected durable run cancellation", {
+            runId,
+            runtimeOwnerId,
+            cancelRequestedAtMs: run.cancelRequestedAtMs,
+          }, "engine:cancel-watch");
           controller.abort();
           return;
         }
       } catch (error) {
-        console.warn(
-          `[smithers] failed to poll run cancel state: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        logWarning("failed to poll run cancel state", {
+          runId,
+          runtimeOwnerId,
+          error:
+            error instanceof Error ? error.message : String(error),
+        }, "engine:cancel-watch");
       }
       await Bun.sleep(RUN_CANCEL_POLL_MS);
     }
@@ -995,6 +1010,16 @@ async function executeTask(
     if (signal?.aborted) {
       throw makeAbortError();
     }
+    logDebug("task execution starting", {
+      runId,
+      nodeId: desc.nodeId,
+      iteration: desc.iteration,
+      attempt: attemptNo,
+      workflowName,
+      taskRoot,
+      hasAgent: Boolean(desc.agent),
+      cacheEnabled,
+    }, "engine:task");
     if (cacheEnabled) {
       const schemaSig = schemaSignature(desc.outputTable as any);
       const agentSig = cacheAgent?.id ?? "agent";
@@ -1023,6 +1048,13 @@ async function executeTask(
         if (valid.ok) {
           payload = valid.data;
           cached = true;
+          logInfo("cache hit for task output", {
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+            cacheKey,
+          }, "engine:task-cache");
         }
       }
     }
@@ -1309,14 +1341,20 @@ async function executeTask(
                 `Step ${i}: ${(s?.text ?? "").slice(0, 200)}`,
             );
             const finishReason = (result as any).finishReason ?? "unknown";
-            console.log(
-              `[JSON Debug] finishReason=${finishReason}, text.length=${text.length}, steps.count=${debugSteps.length}`,
-            );
-            console.log(`[JSON Debug] text start: ${text.slice(0, 300)}`);
-            console.log(`[JSON Debug] text end: ${text.slice(-500)}`);
-            console.log(
-              `[JSON Debug] last step text: ${debugSteps[debugSteps.length - 1]?.text?.slice(0, 500) ?? "none"}`,
-            );
+            logDebug("agent response did not contain valid JSON output", {
+              runId,
+              nodeId: desc.nodeId,
+              iteration: desc.iteration,
+              attempt: attemptNo,
+              finishReason,
+              textLength: text.length,
+              stepCount: debugSteps.length,
+              textStart: text.slice(0, 300),
+              textEnd: text.slice(-500),
+              lastStepText:
+                debugSteps[debugSteps.length - 1]?.text?.slice(0, 500) ??
+                "none",
+            }, "engine:task-json");
             throw new Error("No valid JSON output found in agent response");
           }
         }
@@ -1528,14 +1566,28 @@ async function executeTask(
       attempt: attemptNo,
       timestampMs: nowMs(),
     });
+    logInfo("task execution finished", {
+      runId,
+      nodeId: desc.nodeId,
+      iteration: desc.iteration,
+      attempt: attemptNo,
+      cached,
+      jjPointer,
+    }, "engine:task");
   } catch (err) {
     try {
       await eventBus.flush();
     } catch (flushError) {
-      console.error(
-        `[smithers] Failed to flush queued events for "${desc.nodeId}":`,
-        flushError instanceof Error ? flushError.message : flushError,
-      );
+      logError("failed to flush queued task events", {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        error:
+          flushError instanceof Error
+            ? flushError.message
+            : String(flushError),
+      }, "engine:task-events");
     }
     if (signal?.aborted || isAbortError(err)) {
       await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
@@ -1563,9 +1615,23 @@ async function executeTask(
         reason: "aborted",
         timestampMs: nowMs(),
       });
+      logInfo("task execution cancelled", {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        error: err instanceof Error ? err.message : String(err),
+      }, "engine:task");
       return;
     }
-    console.error(`[smithers] Task "${desc.nodeId}" failed (attempt ${attemptNo + 1}/${desc.retries + 1}):`, err instanceof Error ? err.message : err);
+    logError("task execution failed", {
+      runId,
+      nodeId: desc.nodeId,
+      iteration: desc.iteration,
+      attempt: attemptNo,
+      maxAttempts: desc.retries + 1,
+      error: err instanceof Error ? err.message : String(err),
+    }, "engine:task");
     await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
       state: "failed",
       finishedAtMs: nowMs(),
@@ -1590,7 +1656,13 @@ async function executeTask(
       if (isAuthError) {
         disabledAgents.add(effectiveAgent);
         const agentName = effectiveAgent?.model ?? effectiveAgent?.id ?? "unknown";
-        console.log(`[smithers] Circuit-breaker: disabled agent ${agentName} due to auth failure`);
+        logWarning("disabled agent after auth failure", {
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          agentName,
+        }, "engine:task-circuit-breaker");
       }
     }
 
@@ -1620,11 +1692,18 @@ async function executeTask(
         attempt: attemptNo + 1,
         timestampMs: nowMs(),
       });
+      logInfo("task scheduled for retry", {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        failedAttempt: attemptNo,
+        nextAttempt: attemptNo + 1,
+      }, "engine:task");
     }
   }
 }
 
-export async function renderFrame<Schema>(
+async function renderFrameAsync<Schema>(
   workflow: SmithersWorkflow<Schema>,
   ctx: any,
   opts?: { baseRootDir?: string },
@@ -1647,7 +1726,41 @@ export async function renderFrame<Schema>(
   return { runId: ctx.runId, frameNo: 0, xml: result.xml, tasks: result.tasks };
 }
 
-export async function runWorkflow<Schema>(
+export function renderFrameEffect<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  ctx: any,
+  opts?: { baseRootDir?: string },
+) {
+  return fromPromise("render frame", () => renderFrameAsync(workflow, ctx, opts)).pipe(
+    Effect.annotateLogs({
+      runId: ctx?.runId ?? "",
+      iteration: ctx?.iteration ?? 0,
+    }),
+    Effect.withLogSpan("engine:render-frame"),
+  );
+}
+
+export async function renderFrame<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  ctx: any,
+  opts?: { baseRootDir?: string },
+): Promise<{
+  runId: string;
+  frameNo: number;
+  xml: any;
+  tasks: TaskDescriptor[];
+}> {
+  return runPromise(renderFrameEffect(workflow, ctx, opts));
+}
+
+async function runWorkflowAsync<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  opts: RunOptions,
+): Promise<RunResult> {
+  return await runWorkflowBody(workflow, opts);
+}
+
+async function runWorkflowBody<Schema>(
   workflow: SmithersWorkflow<Schema>,
   opts: RunOptions,
 ): Promise<RunResult> {
@@ -1708,6 +1821,15 @@ export async function runWorkflow<Schema>(
 
   const wakeLock = acquireCaffeinate();
   try {
+    logInfo("starting workflow run", {
+      runId,
+      workflowPath: resolvedWorkflowPath ?? null,
+      rootDir,
+      maxConcurrency,
+      allowNetwork,
+      hotReload: hotOpts.enabled,
+      resume: Boolean(opts.resume),
+    }, "engine:run");
     const existingRun = await adapter.getRun(runId);
     if (opts.resume && existingRun) {
       assertResumeDurabilityMetadata(existingRun, runMetadata, resolvedWorkflowPath);
@@ -1877,6 +1999,9 @@ export async function runWorkflow<Schema>(
 
     while (true) {
       if (runAbortController.signal.aborted) {
+        logInfo("run abort observed in scheduler loop", {
+          runId,
+        }, "engine:run");
         await adapter.updateRun(runId, {
           status: "cancelled",
           finishedAtMs: nowMs(),
@@ -1907,6 +2032,11 @@ export async function runWorkflow<Schema>(
               changedFiles: result.changedFiles,
               timestampMs: nowMs(),
             });
+            logInfo("workflow hot reloaded", {
+              runId,
+              generation: result.generation,
+              changedFileCount: result.changedFiles.length,
+            }, "engine:hot");
             opts.onProgress?.({
               type: "WorkflowReloaded",
               runId,
@@ -1923,6 +2053,15 @@ export async function runWorkflow<Schema>(
               changedFiles: result.changedFiles,
               timestampMs: nowMs(),
             });
+            logWarning("workflow hot reload failed", {
+              runId,
+              generation: result.generation,
+              changedFileCount: result.changedFiles.length,
+              error:
+                result.error instanceof Error
+                  ? result.error.message
+                  : String(result.error),
+            }, "engine:hot");
             opts.onProgress?.({
               type: "WorkflowReloadFailed",
               runId,
@@ -1939,6 +2078,12 @@ export async function runWorkflow<Schema>(
               changedFiles: result.changedFiles,
               timestampMs: nowMs(),
             });
+            logWarning("workflow hot reload marked unsafe", {
+              runId,
+              generation: result.generation,
+              changedFileCount: result.changedFiles.length,
+              reason: result.reason,
+            }, "engine:hot");
             opts.onProgress?.({
               type: "WorkflowReloadUnsafe",
               runId,
@@ -2116,7 +2261,11 @@ export async function runWorkflow<Schema>(
               outputTable: task.outputTableName,
               label: task.label ?? null,
             });
-            process.stderr.write(`[smithers] Recovered orphaned in-progress task: ${task.nodeId}\n`);
+            logWarning("recovered orphaned in-progress task", {
+              runId,
+              nodeId: task.nodeId,
+              iteration: task.iteration,
+            }, "engine:run");
           }
           continue;
         }
@@ -2145,7 +2294,10 @@ export async function runWorkflow<Schema>(
         if (failedTasks.length > 0) {
           const failedIds = failedTasks.map((t) => t.nodeId);
           const errorMsg = `Task(s) failed: ${failedIds.join(", ")}`;
-          console.error(`[smithers] ${errorMsg}`);
+          logError("workflow failed due to task failures", {
+            runId,
+            failedTaskIds: failedIds.join(","),
+          }, "engine:run");
           await adapter.updateRun(runId, {
             status: "failed",
             finishedAtMs: nowMs(),
@@ -2232,6 +2384,9 @@ export async function runWorkflow<Schema>(
           runId,
           timestampMs: nowMs(),
         });
+        logInfo("workflow run finished", {
+          runId,
+        }, "engine:run");
 
         const outputTable = schema.output;
         let output: unknown = undefined;
@@ -2294,7 +2449,30 @@ export async function runWorkflow<Schema>(
       }
     }
   } catch (err) {
-    console.error("[smithers] runWorkflow error:", err);
+    if (runAbortController.signal.aborted || isAbortError(err)) {
+      logInfo("workflow run cancelled while handling error", {
+        runId,
+        error: err instanceof Error ? err.message : String(err),
+      }, "engine:run");
+      await adapter.updateRun(runId, {
+        status: "cancelled",
+        finishedAtMs: nowMs(),
+        heartbeatAtMs: null,
+        runtimeOwnerId: null,
+        cancelRequestedAtMs: null,
+        errorJson: JSON.stringify(errorToJson(err)),
+      });
+      await eventBus.emitEventWithPersist({
+        type: "RunCancelled",
+        runId,
+        timestampMs: nowMs(),
+      });
+      return { runId, status: "cancelled" };
+    }
+    logError("workflow run failed with unhandled error", {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    }, "engine:run");
     const errorInfo = errorToJson(err);
     await adapter.updateRun(runId, {
       status: "failed",
@@ -2317,4 +2495,26 @@ export async function runWorkflow<Schema>(
     await hotController?.close();
     wakeLock.release();
   }
+}
+
+export function runWorkflowEffect<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  opts: RunOptions,
+) {
+  return fromPromise("run workflow", () => runWorkflowAsync(workflow, opts)).pipe(
+    Effect.annotateLogs({
+      runId: opts.runId ?? "",
+      workflowPath: opts.workflowPath ?? "",
+      maxConcurrency: opts.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
+      hot: Boolean(opts.hot),
+    }),
+    Effect.withLogSpan("engine:run-workflow"),
+  );
+}
+
+export async function runWorkflow<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  opts: RunOptions,
+): Promise<RunResult> {
+  return runPromise(runWorkflowEffect(workflow, opts));
 }
