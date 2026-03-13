@@ -1,4 +1,7 @@
-import { spawn } from "node:child_process";
+import * as Command from "@effect/platform/Command";
+import { Effect, Fiber, Stream } from "effect";
+import { runPromise } from "../effect/runtime";
+
 /**
  * Cross-version-safe JJ helpers.
  *
@@ -18,52 +21,63 @@ export type RunJjResult = {
   stderr: string;
 };
 
+function collectUtf8(stream: Stream.Stream<Uint8Array, unknown, never>) {
+  const decoder = new TextDecoder("utf8");
+  return Stream.runFold(stream, "", (acc, chunk) =>
+    acc + decoder.decode(chunk, { stream: true }),
+  ).pipe(Effect.map((acc) => acc + decoder.decode()));
+}
+
 /**
  * Run a `jj` command and capture output.
  * Minimal helper used by vcs features and safe to call when jj is missing.
  */
-export async function runJj(
+export function runJjEffect(
+  args: string[],
+  opts: RunJjOptions = {},
+) {
+  let command = Command.make("jj", ...args);
+  if (opts.cwd) {
+    command = Command.workingDirectory(command, opts.cwd);
+  }
+
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.logDebug(`jj ${args.join(" ")}`);
+      const process = yield* Command.start(command);
+      const stdoutFiber = yield* Effect.fork(collectUtf8(process.stdout));
+      const stderrFiber = yield* Effect.fork(collectUtf8(process.stderr));
+      const exitCode = yield* process.exitCode;
+      const stdout = yield* Fiber.join(stdoutFiber);
+      const stderr = yield* Fiber.join(stderrFiber);
+      return {
+        code: Number(exitCode as unknown as number),
+        stdout,
+        stderr,
+      };
+    }),
+  ).pipe(
+    Effect.annotateLogs({
+      vcs: "jj",
+      cwd: opts.cwd ?? "",
+      args: args.join(" "),
+    }),
+    Effect.withLogSpan("vcs:jj"),
+    Effect.catchAll((error) =>
+      Effect.succeed({
+        code: 127,
+        stdout: "",
+        stderr: error instanceof Error ? error.message : String(error),
+      }),
+    ),
+  );
+}
+
+export function runJj(
   args: string[],
   opts: RunJjOptions = {},
 ): Promise<RunJjResult> {
-  return await new Promise<RunJjResult>((resolve) => {
-    try {
-      const child = spawn("jj", args, {
-        stdio: ["ignore", "pipe", "pipe"],
-        cwd: opts.cwd,
-      });
-      let stdout = "";
-      let stderr = "";
-      child.stdout?.on("data", (chunk) => (stdout += chunk.toString("utf8")));
-      child.stderr?.on("data", (chunk) => (stderr += chunk.toString("utf8")));
-
-      // Guard against resolving twice if both 'error' and 'close' fire.
-      let settled = false;
-      function safeResolve(res: RunJjResult) {
-        if (settled) return;
-        settled = true;
-        resolve(res);
-      }
-
-      child.on("error", (err) => {
-        // When jj isn't installed or cannot spawn, normalize to code 127
-        safeResolve({
-          code: 127,
-          stdout: "",
-          stderr: err instanceof Error ? err.message : String(err),
-        });
-      });
-      child.on("close", (code, signal) => {
-        const withSignal = signal
-          ? (stderr ? stderr + "\n" : "") + `terminated by signal ${signal}`
-          : stderr;
-        safeResolve({ code: code ?? 1, stdout, stderr: withSignal });
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      resolve({ code: 127, stdout: "", stderr: message });
-    }
-  });
+  return runPromise(runJjEffect(args, opts));
 }
 
 function jjError(res: RunJjResult): string {
@@ -74,16 +88,23 @@ function jjError(res: RunJjResult): string {
  * Returns the current workspace change id (jj `change_id`) or null on failure.
  * Accepts optional `cwd` to run inside a target repository.
  */
-export async function getJjPointer(cwd?: string): Promise<string | null> {
-  const res = await runJj(
+export function getJjPointerEffect(cwd?: string) {
+  return runJjEffect(
     ["log", "-r", "@", "--no-graph", "--template", "change_id"],
     { cwd },
+  ).pipe(
+    Effect.map((res) => {
+      if (res.code !== 0) return null;
+      const out = res.stdout.trim();
+      return out ? out : null;
+    }),
+    Effect.annotateLogs({ cwd: cwd ?? "" }),
+    Effect.withLogSpan("vcs:jj-pointer"),
   );
-  if (res.code === 0) {
-    const out = res.stdout.trim();
-    return out ? out : null;
-  }
-  return null;
+}
+
+export function getJjPointer(cwd?: string): Promise<string | null> {
+  return runPromise(getJjPointerEffect(cwd));
 }
 
 export type JjRevertResult = {
@@ -95,29 +116,48 @@ export type JjRevertResult = {
  * Restore the working copy to a previously recorded jujutsu `change_id`.
  * Used by the engine to revert attempts within the correct repo/worktree (via `cwd`).
  */
-export async function revertToJjPointer(
+export function revertToJjPointerEffect(
+  pointer: string,
+  cwd?: string,
+) {
+  return runJjEffect(["restore", "--from", pointer], { cwd }).pipe(
+    Effect.map((res) =>
+      res.code === 0
+        ? { success: true as const }
+        : { success: false as const, error: jjError(res) },
+    ),
+    Effect.annotateLogs({ cwd: cwd ?? "", pointer }),
+    Effect.withLogSpan("vcs:jj-revert"),
+  );
+}
+
+export function revertToJjPointer(
   pointer: string,
   cwd?: string,
 ): Promise<JjRevertResult> {
-  const res = await runJj(["restore", "--from", pointer], { cwd });
-  if (res.code === 0) return { success: true };
-  return { success: false, error: jjError(res) };
+  return runPromise(revertToJjPointerEffect(pointer, cwd));
 }
 
 /**
  * Quick repo detection by executing a read-only jj command.
  */
-export async function isJjRepo(cwd?: string): Promise<boolean> {
-  // `jj log -r @` is stable across JJ versions; success implies in-repo
-  const res = await runJj(["log", "-r", "@", "-n", "1", "--no-graph"], {
+export function isJjRepoEffect(cwd?: string) {
+  return runJjEffect(["log", "-r", "@", "-n", "1", "--no-graph"], {
     cwd,
-  });
-  return res.code === 0;
+  }).pipe(
+    Effect.map((res) => res.code === 0),
+    Effect.annotateLogs({ cwd: cwd ?? "" }),
+    Effect.withLogSpan("vcs:jj-is-repo"),
+  );
+}
+
+export function isJjRepo(cwd?: string): Promise<boolean> {
+  return runPromise(isJjRepoEffect(cwd));
 }
 
 export type WorkspaceAddOptions = {
   cwd?: string;
-  atRev?: string; // optional revision/op to base the workspace from
+  atRev?: string;
 };
 
 export type WorkspaceResult = {
@@ -129,40 +169,50 @@ export type WorkspaceResult = {
  * Create a new JJ workspace at `path` with a friendly `name`.
  * NOTE: Syntax may vary between JJ versions; this helper aims to be permissive.
  */
-export async function workspaceAdd(
+export function workspaceAddEffect(
+  name: string,
+  path: string,
+  opts: WorkspaceAddOptions = {},
+) {
+  const attempts: string[][] = [];
+  const revTail = opts.atRev ? ["-r", opts.atRev] : [];
+
+  attempts.push(["workspace", "add", path, "--name", name, ...revTail]);
+  if (opts.atRev) {
+    attempts.push(["workspace", "add", "-r", opts.atRev, path, "--name", name]);
+  }
+  attempts.push(["workspace", "add", name, path, ...revTail]);
+  attempts.push(["workspace", "add", "--wc-path", path, name, ...revTail]);
+
+  return Effect.gen(function* () {
+    let lastErr = "";
+    for (const args of attempts) {
+      const res = yield* runJjEffect(args, { cwd: opts.cwd });
+      if (res.code === 0) {
+        return { success: true as const };
+      }
+      lastErr = jjError(res);
+    }
+    const hint =
+      ` (partial state may exist at ${path}; consider removing it before retrying)`;
+    return { success: false as const, error: lastErr + hint };
+  }).pipe(
+    Effect.annotateLogs({
+      cwd: opts.cwd ?? "",
+      workspaceName: name,
+      workspacePath: path,
+      workspaceAtRev: opts.atRev ?? "",
+    }),
+    Effect.withLogSpan("vcs:jj-workspace-add"),
+  );
+}
+
+export function workspaceAdd(
   name: string,
   path: string,
   opts: WorkspaceAddOptions = {},
 ): Promise<WorkspaceResult> {
-  // Construct multiple attempts to handle JJ syntax differences across versions.
-  const attempts: string[][] = [];
-  const revTail = opts.atRev ? ["-r", opts.atRev] : [];
-
-  // Primary: current JJ syntax – destination path as positional, name via --name
-  attempts.push(["workspace", "add", path, "--name", name, ...revTail]);
-
-  // Alt 1: put -r before path/name
-  if (opts.atRev)
-    attempts.push(["workspace", "add", "-r", opts.atRev, path, "--name", name]);
-
-  // Alt 2: legacy style (name, path)
-  attempts.push(["workspace", "add", name, path, ...revTail]);
-
-  // Alt 3: explicit --wc-path form seen in some versions
-  attempts.push(["workspace", "add", "--wc-path", path, name, ...revTail]);
-
-  // NOTE: Failed attempts may leave partial state (e.g., directories);
-  // callers should clean up on final failure.
-
-  let lastErr = "";
-  for (const args of attempts) {
-    const res = await runJj(args, { cwd: opts.cwd });
-    if (res.code === 0) return { success: true };
-    lastErr = jjError(res);
-  }
-  // Provide a helpful hint: failed attempts may have created partial dirs
-  const hint = " (partial state may exist at " + path + "; consider removing it before retrying)";
-  return { success: false, error: lastErr + hint };
+  return runPromise(workspaceAddEffect(name, path, opts));
 }
 
 export type WorkspaceInfo = {
@@ -175,45 +225,65 @@ export type WorkspaceInfo = {
  * List existing workspaces using a JJ template for structured output.
  * Falls back to parsing human output if `-T` is unavailable.
  */
-export async function workspaceList(cwd?: string): Promise<WorkspaceInfo[]> {
-  // Preferred: structured names via template
-  let res = await runJj(["workspace", "list", "-T", 'name ++ "\\n"'], {
-    cwd,
-  });
-  if (res.code === 0) {
-    const lines = res.stdout
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    return lines.map((name) => ({ name, path: null, selected: false }));
-  }
+export function workspaceListEffect(
+  cwd?: string,
+) {
+  return Effect.gen(function* () {
+    let res = yield* runJjEffect(["workspace", "list", "-T", 'name ++ "\\n"'], {
+      cwd,
+    });
+    if (res.code === 0) {
+      const lines = res.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      return lines.map((name) => ({ name, path: null, selected: false }));
+    }
 
-  // Fallback: plain human format; try to detect current selection by leading '* '
-  res = await runJj(["workspace", "list"], { cwd });
-  if (res.code !== 0) return [];
-  const rows: WorkspaceInfo[] = [];
-  for (const raw of res.stdout.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line) continue;
-    const selected = line.startsWith("*");
-    const rawName = selected ? line.replace(/^\*\s*/, "").trim() : line;
-    // Older JJ may include columns like path; keep only the first token as name.
-    const name = rawName.split(/\s+/)[0] ?? "";
-    if (!name) continue;
-    rows.push({ name, path: null, selected });
-  }
-  return rows;
+    res = yield* runJjEffect(["workspace", "list"], { cwd });
+    if (res.code !== 0) return [];
+    const rows: WorkspaceInfo[] = [];
+    for (const raw of res.stdout.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const selected = line.startsWith("*");
+      const rawName = selected ? line.replace(/^\*\s*/, "").trim() : line;
+      const name = rawName.split(/\s+/)[0] ?? "";
+      if (!name) continue;
+      rows.push({ name, path: null, selected });
+    }
+    return rows;
+  }).pipe(
+    Effect.annotateLogs({ cwd: cwd ?? "" }),
+    Effect.withLogSpan("vcs:jj-workspace-list"),
+  );
+}
+
+export function workspaceList(cwd?: string): Promise<WorkspaceInfo[]> {
+  return runPromise(workspaceListEffect(cwd));
 }
 
 /**
  * Close the given workspace by name.
  */
-export async function workspaceClose(
+export function workspaceCloseEffect(
+  name: string,
+  opts: { cwd?: string } = {},
+) {
+  return runJjEffect(["workspace", "forget", name], { cwd: opts.cwd }).pipe(
+    Effect.map((res) =>
+      res.code === 0
+        ? { success: true as const }
+        : { success: false as const, error: jjError(res) },
+    ),
+    Effect.annotateLogs({ cwd: opts.cwd ?? "", workspaceName: name }),
+    Effect.withLogSpan("vcs:jj-workspace-close"),
+  );
+}
+
+export function workspaceClose(
   name: string,
   opts: { cwd?: string } = {},
 ): Promise<WorkspaceResult> {
-  // `jj workspace close` does not exist; correct subcommand is `forget`.
-  const res = await runJj(["workspace", "forget", name], { cwd: opts.cwd });
-  if (res.code === 0) return { success: true };
-  return { success: false, error: jjError(res) };
+  return runPromise(workspaceCloseEffect(name, opts));
 }
