@@ -1,12 +1,16 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import { resolve, dirname, sep, basename } from "node:path";
+import { Effect } from "effect";
 import { isRunHeartbeatFresh, runWorkflow } from "../engine";
 import { newRunId } from "../utils/ids";
 import type { SmithersWorkflow } from "../SmithersWorkflow";
 import type { SmithersEvent } from "../SmithersEvent";
 import { SmithersDb } from "../db/adapter";
 import { ensureSmithersTables } from "../db/ensure";
+import { fromPromise } from "../effect/interop";
+import { logError, logInfo, logWarning } from "../effect/logging";
+import { runPromise, runSync } from "../effect/runtime";
 import { approveNode, denyNode } from "../engine/approvals";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { nowMs } from "../utils/time";
@@ -109,10 +113,39 @@ async function readBody(req: IncomingMessage, maxBytes: number): Promise<any> {
   }
 }
 
+function readBodyEffect(req: IncomingMessage, maxBytes: number) {
+  return Effect.tryPromise({
+    try: () => readBody(req, maxBytes),
+    catch: (cause) =>
+      cause instanceof HttpError
+        ? cause
+        : new HttpError(
+            500,
+            "SERVER_ERROR",
+            cause instanceof Error ? cause.message : String(cause),
+          ),
+  }).pipe(
+    Effect.annotateLogs({
+      contentLength: req.headers["content-length"] ?? null,
+      maxBytes,
+      method: req.method ?? "",
+      url: req.url ?? "",
+    }),
+    Effect.withLogSpan("server:read-body"),
+  );
+}
+
 async function loadWorkflow(absPath: string): Promise<SmithersWorkflow<any>> {
   const mod = await import(pathToFileURL(absPath).href);
   if (!mod.default) throw new Error("Workflow must export default");
   return mod.default as SmithersWorkflow<any>;
+}
+
+function loadWorkflowEffect(absPath: string) {
+  return fromPromise("load workflow module", () => loadWorkflow(absPath)).pipe(
+    Effect.annotateLogs({ workflowPath: absPath }),
+    Effect.withLogSpan("server:load-workflow"),
+  );
 }
 
 function sendJson(res: ServerResponse, status: number, payload: any) {
@@ -186,33 +219,33 @@ function buildMirrorOnProgress(
 ) {
   if (!adapter) return undefined;
   let runInserted = false;
-      const ensureRun = async () => {
-        if (runInserted) return;
-        await adapter.insertRun({
-          runId,
-          workflowName,
-          workflowPath,
-          workflowHash: null,
-          status: "running",
-          createdAtMs: nowMs(),
-          startedAtMs: nowMs(),
-          finishedAtMs: null,
-          heartbeatAtMs: eventLoopNow(),
-          runtimeOwnerId: null,
-          cancelRequestedAtMs: null,
-          vcsType: null,
-          vcsRoot: null,
-          vcsRevision: null,
-          errorJson: null,
-          configJson,
-        });
-        runInserted = true;
-      };
+  const ensureRun = async () => {
+    if (runInserted) return;
+    await adapter.insertRun({
+      runId,
+      workflowName,
+      workflowPath,
+      workflowHash: null,
+      status: "running",
+      createdAtMs: nowMs(),
+      startedAtMs: nowMs(),
+      finishedAtMs: null,
+      heartbeatAtMs: eventLoopNow(),
+      runtimeOwnerId: null,
+      cancelRequestedAtMs: null,
+      vcsType: null,
+      vcsRoot: null,
+      vcsRevision: null,
+      errorJson: null,
+      configJson,
+    });
+    runInserted = true;
+  };
 
-  return (event: SmithersEvent) => {
-    void (async () => {
-      await ensureRun();
-      await adapter.insertEventWithNextSeq({
+  const mirrorEventEffect = (event: SmithersEvent) =>
+    Effect.gen(function* () {
+      yield* fromPromise("ensure mirrored run", () => ensureRun());
+      yield* adapter.insertEventWithNextSeqEffect({
         runId,
         timestampMs: event.timestampMs,
         type: event.type,
@@ -220,7 +253,7 @@ function buildMirrorOnProgress(
       });
       switch (event.type) {
         case "RunStarted":
-          await adapter.updateRun(runId, {
+          yield* adapter.updateRunEffect(runId, {
             status: "running",
             startedAtMs: event.timestampMs,
             heartbeatAtMs: event.timestampMs,
@@ -228,10 +261,10 @@ function buildMirrorOnProgress(
           });
           break;
         case "RunStatusChanged":
-          await adapter.updateRun(runId, { status: event.status });
+          yield* adapter.updateRunEffect(runId, { status: event.status });
           break;
         case "RunFinished":
-          await adapter.updateRun(runId, {
+          yield* adapter.updateRunEffect(runId, {
             status: "finished",
             finishedAtMs: event.timestampMs,
             heartbeatAtMs: null,
@@ -240,7 +273,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "RunFailed":
-          await adapter.updateRun(runId, {
+          yield* adapter.updateRunEffect(runId, {
             status: "failed",
             finishedAtMs: event.timestampMs,
             heartbeatAtMs: null,
@@ -250,7 +283,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "RunCancelled":
-          await adapter.updateRun(runId, {
+          yield* adapter.updateRunEffect(runId, {
             status: "cancelled",
             finishedAtMs: event.timestampMs,
             heartbeatAtMs: null,
@@ -259,7 +292,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "NodePending":
-          await adapter.insertNode({
+          yield* adapter.insertNodeEffect({
             runId: event.runId,
             nodeId: event.nodeId,
             iteration: event.iteration,
@@ -271,7 +304,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "NodeWaitingApproval":
-          await adapter.insertNode({
+          yield* adapter.insertNodeEffect({
             runId: event.runId,
             nodeId: event.nodeId,
             iteration: event.iteration,
@@ -283,7 +316,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "NodeStarted":
-          await adapter.insertNode({
+          yield* adapter.insertNodeEffect({
             runId: event.runId,
             nodeId: event.nodeId,
             iteration: event.iteration,
@@ -295,7 +328,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "NodeFinished":
-          await adapter.insertNode({
+          yield* adapter.insertNodeEffect({
             runId: event.runId,
             nodeId: event.nodeId,
             iteration: event.iteration,
@@ -307,7 +340,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "NodeFailed":
-          await adapter.insertNode({
+          yield* adapter.insertNodeEffect({
             runId: event.runId,
             nodeId: event.nodeId,
             iteration: event.iteration,
@@ -319,7 +352,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "NodeCancelled":
-          await adapter.insertNode({
+          yield* adapter.insertNodeEffect({
             runId: event.runId,
             nodeId: event.nodeId,
             iteration: event.iteration,
@@ -331,7 +364,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "NodeSkipped":
-          await adapter.insertNode({
+          yield* adapter.insertNodeEffect({
             runId: event.runId,
             nodeId: event.nodeId,
             iteration: event.iteration,
@@ -343,7 +376,7 @@ function buildMirrorOnProgress(
           });
           break;
         case "NodeRetrying":
-          await adapter.insertNode({
+          yield* adapter.insertNodeEffect({
             runId: event.runId,
             nodeId: event.nodeId,
             iteration: event.iteration,
@@ -355,8 +388,24 @@ function buildMirrorOnProgress(
           });
           break;
       }
-    })().catch((err) => {
-      console.error("[smithers] mirror event error:", err);
+    }).pipe(
+      Effect.annotateLogs({
+        runId,
+        workflowName,
+        workflowPath,
+        eventType: event.type,
+      }),
+      Effect.withLogSpan("server:mirror-event"),
+    );
+
+  return (event: SmithersEvent) => {
+    void runPromise(mirrorEventEffect(event)).catch((err) => {
+      logError("mirror event persistence failed", {
+        runId,
+        workflowPath,
+        eventType: event.type,
+        error: err instanceof Error ? err.message : String(err),
+      }, "server:mirror-event");
     });
   };
 }
@@ -374,7 +423,7 @@ export type ServerOptions = {
   allowNetwork?: boolean;
 };
 
-export function startServer(opts: ServerOptions = {}) {
+function startServerInternal(opts: ServerOptions = {}) {
   const port = opts.port ?? 7331;
   const serverDb = opts.db ?? null;
   const authToken = opts.authToken ?? process.env.SMITHERS_API_KEY;
@@ -385,6 +434,12 @@ export function startServer(opts: ServerOptions = {}) {
     ensureSmithersTables(serverDb);
   }
   const serverAdapter = serverDb ? new SmithersDb(serverDb) : null;
+  logInfo("starting smithers server", {
+    port,
+    rootDir: rootDir ?? null,
+    allowNetwork,
+    hasServerDb: Boolean(serverDb),
+  }, "server:start");
   const server = createServer(async (req, res) => {
     try {
       assertAuth(req, authToken);
@@ -405,7 +460,7 @@ export function startServer(opts: ServerOptions = {}) {
       }
 
       if (method === "POST" && url.pathname === "/v1/runs") {
-        const body = await readBody(req, maxBodyBytes);
+        const body = await runPromise(readBodyEffect(req, maxBodyBytes));
         if (!body?.workflowPath || typeof body.workflowPath !== "string") {
           throw new HttpError(
             400,
@@ -436,7 +491,7 @@ export function startServer(opts: ServerOptions = {}) {
           }
         }
         const workflowPath = resolveWorkflowPath(body.workflowPath, rootDir);
-        const workflow = await loadWorkflow(workflowPath);
+        const workflow = await runPromise(loadWorkflowEffect(workflowPath));
         ensureSmithersTables(workflow.db as any);
         const sameDb = isSameDb(serverDb, workflow.db as any);
         const abort = new AbortController();
@@ -479,6 +534,12 @@ export function startServer(opts: ServerOptions = {}) {
         );
         const record: RunRecord = { workflow, abort, workflowPath };
         runs.set(runId, record);
+        logInfo("accepted run request", {
+          runId,
+          workflowPath,
+          resume: Boolean(body.resume),
+          sameDb,
+        }, "server:run");
 
         runWorkflow(workflow, {
           runId,
@@ -498,7 +559,11 @@ export function startServer(opts: ServerOptions = {}) {
             }
           })
           .catch((err) => {
-            console.error("[smithers] server run error:", err);
+            logError("server run execution failed", {
+              runId,
+              workflowPath,
+              error: err instanceof Error ? err.message : String(err),
+            }, "server:run");
             runs.delete(runId);
           });
 
@@ -509,7 +574,7 @@ export function startServer(opts: ServerOptions = {}) {
       const resumeMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/resume$/);
       if (method === "POST" && resumeMatch) {
         const runId = resumeMatch[1]!;
-        const body = await readBody(req, maxBodyBytes);
+        const body = await runPromise(readBodyEffect(req, maxBodyBytes));
         if (!body?.workflowPath || typeof body.workflowPath !== "string") {
           throw new HttpError(
             400,
@@ -540,7 +605,7 @@ export function startServer(opts: ServerOptions = {}) {
           }
         }
         const workflowPath = resolveWorkflowPath(body.workflowPath, rootDir);
-        const workflow = await loadWorkflow(workflowPath);
+        const workflow = await runPromise(loadWorkflowEffect(workflowPath));
         ensureSmithersTables(workflow.db as any);
         const sameDb = isSameDb(serverDb, workflow.db as any);
         const adapter = new SmithersDb(workflow.db as any);
@@ -554,6 +619,11 @@ export function startServer(opts: ServerOptions = {}) {
         const abort = new AbortController();
         const record: RunRecord = { workflow, abort, workflowPath };
         runs.set(runId, record);
+        logInfo("accepted run resume request", {
+          runId,
+          workflowPath,
+          sameDb,
+        }, "server:resume");
         const mirrorAdapter = serverAdapter && !sameDb ? serverAdapter : null;
         const effectiveRoot = rootDir ?? dirname(workflowPath);
         const workflowName = basename(workflowPath, ".tsx");
@@ -586,7 +656,11 @@ export function startServer(opts: ServerOptions = {}) {
             }
           })
           .catch((err) => {
-            console.error("[smithers] server resume error:", err);
+            logError("server resume execution failed", {
+              runId,
+              workflowPath,
+              error: err instanceof Error ? err.message : String(err),
+            }, "server:resume");
             runs.delete(runId);
           });
 
@@ -610,11 +684,45 @@ export function startServer(opts: ServerOptions = {}) {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });
         }
+        if (run.status === "waiting-approval") {
+          const cancelledAtMs = nowMs();
+          logInfo("cancelling waiting-approval run", {
+            runId,
+            status: run.status,
+          }, "server:cancel");
+          await adapter.updateRun(runId, {
+            status: "cancelled",
+            finishedAtMs: cancelledAtMs,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+          });
+          await adapter.insertEventWithNextSeq({
+            runId,
+            timestampMs: cancelledAtMs,
+            type: "RunCancelled",
+            payloadJson: JSON.stringify({
+              type: "RunCancelled",
+              runId,
+              timestampMs: cancelledAtMs,
+            }),
+          });
+          return sendJson(res, 200, { runId });
+        }
         if (run.status !== "running" || !isRunHeartbeatFresh(run)) {
+          logWarning("cancel rejected for inactive run", {
+            runId,
+            status: run.status,
+            heartbeatAtMs: run.heartbeatAtMs ?? null,
+          }, "server:cancel");
           return sendJson(res, 409, {
             error: { code: "RUN_NOT_ACTIVE", message: "Run is not currently active" },
           });
         }
+        logInfo("cancelling active run", {
+          runId,
+          status: run.status,
+        }, "server:cancel");
         await adapter.requestRunCancel(runId, nowMs());
         record?.abort.abort();
         return sendJson(res, 200, { runId });
@@ -647,6 +755,10 @@ export function startServer(opts: ServerOptions = {}) {
         res.write(`retry: 1000\n\n`);
         let closed = false;
         let lastSeq = parseOptionalInt(url.searchParams.get("afterSeq"), -1);
+        logInfo("opened run event stream", {
+          runId,
+          afterSeq: lastSeq,
+        }, "server:sse");
         let lastHeartbeat = Date.now();
         const poll = async () => {
           if (closed || res.writableEnded) return;
@@ -682,7 +794,7 @@ export function startServer(opts: ServerOptions = {}) {
           try {
             while (!closed && !res.writableEnded) {
               await poll();
-              await new Promise((resolve) => setTimeout(resolve, 500));
+              await runPromise(Effect.sleep(500));
             }
           } catch {
             closed = true;
@@ -842,6 +954,9 @@ export function startServer(opts: ServerOptions = {}) {
   });
 
   server.on("close", () => {
+    logInfo("stopping smithers server", {
+      activeRuns: runs.size,
+    }, "server:stop");
     for (const [runId, record] of runs) {
       try {
         record.abort.abort();
@@ -852,4 +967,19 @@ export function startServer(opts: ServerOptions = {}) {
 
   server.listen(port);
   return server;
+}
+
+export function startServerEffect(opts: ServerOptions = {}) {
+  return Effect.sync(() => startServerInternal(opts)).pipe(
+    Effect.annotateLogs({
+      port: opts.port ?? 7331,
+      rootDir: opts.rootDir ?? "",
+      allowNetwork: Boolean(opts.allowNetwork),
+    }),
+    Effect.withLogSpan("server:start"),
+  );
+}
+
+export function startServer(opts: ServerOptions = {}) {
+  return runSync(startServerEffect(opts));
 }
