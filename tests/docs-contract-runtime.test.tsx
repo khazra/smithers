@@ -210,6 +210,42 @@ describe("docs: runWorkflow", () => {
     cleanup();
   });
 
+  test("default logDir writes NDJSON logs under rootDir", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-log-default-"));
+    const { smithers, outputs, cleanup } = createTestSmithers({
+      output: z.object({ value: z.number() }),
+    });
+
+    const workflow = smithers(() => (
+      <Workflow name="default-logs">
+        <Task id="t" output={outputs.output}>
+          {{ value: 1 }}
+        </Task>
+      </Workflow>
+    ));
+
+    const runId = "default-log-run";
+    const result = await runWorkflow(workflow, {
+      input: {},
+      runId,
+      rootDir: dir,
+    });
+
+    expect(result.status).toBe("finished");
+    const logPath = join(
+      dir,
+      ".smithers",
+      "executions",
+      runId,
+      "logs",
+      "stream.ndjson",
+    );
+    expect(existsSync(logPath)).toBe(true);
+
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  });
+
   test("AbortSignal cancels a running workflow", async () => {
     const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
     const controller = new AbortController();
