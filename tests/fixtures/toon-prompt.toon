@@ -1,0 +1,17 @@
+imports:
+  agents:
+    - from: "./toon-agent.ts"
+      use: [echo]
+
+name: toon-prompt
+
+input:
+  name: string
+
+steps:
+  - id: greet
+    agent: echo
+    prompt: |
+      Hello {input.name}
+    output:
+      message: string

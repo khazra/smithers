@@ -1,0 +1,28 @@
+name: toon-basic
+
+components:
+  Wrap:
+    params:
+      value: string
+    steps:
+      - id: "{id}-wrap"
+        run: |
+          return { wrapped: `<<${params.value}>>` };
+        output:
+          wrapped: string
+
+input:
+  name: string
+
+steps:
+  - id: greet
+    run: |
+      return { message: `Hello ${input.name}` };
+    output:
+      message: string
+
+  - id: wrap
+    kind: component
+    use: Wrap
+    with:
+      value: "{greet.message}"

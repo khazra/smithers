@@ -1,0 +1,29 @@
+imports:
+  agents:
+    - from: "./toon-agent.ts"
+      use: [researcher, writer]
+
+name: research-report
+
+input:
+  topic: string
+
+steps:
+  - id: research
+    agent: researcher
+    prompt: |
+      Research the topic.
+      Topic: {input.topic}
+    output:
+      summary: string
+      keyPoints: string[]
+
+  - id: report
+    agent: writer
+    prompt: |
+      Summary: {research.summary}
+      Key points: {research.keyPoints}
+    output:
+      title: string
+      body: string
+      wordCount: number

@@ -1,0 +1,20 @@
+components:
+  Summarize:
+    params:
+      text: string
+    steps:
+      - id: "{id}_summary"
+        run: |
+          const trimmed = params.text.trim();
+          return { summary: trimmed.slice(0, 40) };
+        output:
+          summary: string
+
+      - id: "{id}_tags"
+        needs: ["{id}_summary"]
+        run: |
+          const base = steps[`${id}_summary`].summary;
+          const words = base.split(/\s+/).filter(Boolean);
+          return { tags: words.slice(0, 2).map((w) => w.toLowerCase()) };
+        output:
+          tags: string[]
