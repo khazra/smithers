@@ -1,4 +1,6 @@
 import type { AgentLike } from "./AgentLike";
+import type { CachePolicy } from "./CachePolicy";
+import type { RetryPolicy } from "./RetryPolicy";
 
 export type TaskDescriptor = {
   nodeId: string;
@@ -6,6 +8,7 @@ export type TaskDescriptor = {
   iteration: number;
   ralphId?: string;
   dependsOn?: string[];
+  needs?: Record<string, string>;
   worktreeId?: string;
   worktreePath?: string;
   worktreeBranch?: string;
@@ -21,8 +24,10 @@ export type TaskDescriptor = {
   approvalOnDeny?: "fail" | "continue" | "skip";
   skipIf: boolean;
   retries: number;
+  retryPolicy?: RetryPolicy;
   timeoutMs: number | null;
   continueOnFail: boolean;
+  cachePolicy?: CachePolicy;
   /** Agent or array of agents [primary, fallback1, fallback2, ...]. Tries in order until one succeeds. */
   agent?: AgentLike | AgentLike[];
   prompt?: string;

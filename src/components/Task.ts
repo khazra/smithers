@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { markdownComponents } from "../markdownComponents";
 import { zodSchemaToJsonExample } from "../zod-to-example";
 import type { AgentLike } from "../AgentLike";
+import type { CachePolicy } from "../CachePolicy";
+import type { RetryPolicy } from "../RetryPolicy";
 
 export type TaskProps<Row> = {
   key?: string;
@@ -21,7 +23,9 @@ export type TaskProps<Row> = {
   needsApproval?: boolean;
   timeoutMs?: number;
   retries?: number;
+  retryPolicy?: RetryPolicy;
   continueOnFail?: boolean;
+  cache?: CachePolicy;
   label?: string;
   meta?: Record<string, unknown>;
   children: string | Row | (() => Row | Promise<Row>) | React.ReactNode;

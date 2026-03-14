@@ -1,6 +1,16 @@
 export { Workflow } from "./Workflow";
 export type { WorkflowProps } from "./Workflow";
 
+export {
+  Approval,
+  approvalDecisionSchema,
+} from "./Approval";
+export type {
+  ApprovalDecision,
+  ApprovalProps,
+  ApprovalRequest,
+} from "./Approval";
+
 export { Task } from "./Task";
 export type { TaskProps } from "./Task";
 

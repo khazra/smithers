@@ -7,8 +7,12 @@ import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
 import { createSmithersContext } from "./context";
-import { Workflow as BaseWorkflow, Task as BaseTask } from "./components";
-import type { WorkflowProps, TaskProps } from "./components";
+import {
+  Approval as BaseApproval,
+  Workflow as BaseWorkflow,
+  Task as BaseTask,
+} from "./components";
+import type { ApprovalProps, WorkflowProps, TaskProps } from "./components";
 
 import { zodToTable } from "./zodToTable";
 import { zodToCreateTableSQL } from "./zodToCreateTableSQL";
@@ -37,6 +41,7 @@ function computeSchemaSig(
 
 export type CreateSmithersApi<Schema = any> = {
   Workflow: (props: WorkflowProps) => React.ReactElement;
+  Approval: <Row>(props: ApprovalProps<Row>) => React.ReactElement;
   Task: <Row>(props: TaskProps<Row>) => React.ReactElement;
   useCtx: () => SmithersCtx<Schema>;
   smithers: (
@@ -171,6 +176,10 @@ export function createSmithers<
     );
   }
 
+  function Approval<Row>(props: ApprovalProps<Row>) {
+    return React.createElement(BaseApproval, props as any);
+  }
+
   /**
    * Task wrapper that resolves ZodObject output references against the
    * schema registry by reference equality, injecting the outputSchema.
@@ -197,6 +206,7 @@ export function createSmithers<
 
   const api = {
     Workflow,
+    Approval,
     Task,
     useCtx,
     smithers: boundSmithers,

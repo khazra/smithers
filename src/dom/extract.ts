@@ -232,9 +232,15 @@ export function extractFromHost(
           : undefined;
       const skipIf = Boolean(raw.skipIf);
       const retries = typeof raw.retries === "number" ? raw.retries : 0;
+      const retryPolicy =
+        raw.retryPolicy && typeof raw.retryPolicy === "object"
+          ? raw.retryPolicy
+          : undefined;
       const timeoutMs =
         typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
       const continueOnFail = Boolean(raw.continueOnFail);
+      const cachePolicy =
+        raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
 
       const agent = raw.agent;
       const kind = raw.__smithersKind;
@@ -254,6 +260,14 @@ export function extractFromHost(
       const dependsOn = Array.isArray(raw.dependsOn)
         ? raw.dependsOn.filter((value: unknown) => typeof value === "string")
         : undefined;
+      const needs =
+        raw.needs && typeof raw.needs === "object" && !Array.isArray(raw.needs)
+          ? Object.fromEntries(
+              Object.entries(raw.needs).filter(
+                ([, value]) => typeof value === "string",
+              ),
+            )
+          : undefined;
 
       const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
 
@@ -271,13 +285,16 @@ export function extractFromHost(
         outputRef,
         outputSchema,
         dependsOn,
+        needs,
         needsApproval,
         approvalMode,
         approvalOnDeny,
         skipIf,
         retries,
+        retryPolicy,
         timeoutMs,
         continueOnFail,
+        cachePolicy,
         agent,
         prompt,
         staticPayload,

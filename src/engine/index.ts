@@ -24,6 +24,7 @@ import { sha256Hex } from "../utils/hash";
 import { nowMs } from "../utils/time";
 import { newRunId } from "../utils/ids";
 import { errorToJson, SmithersError } from "../utils/errors";
+import { computeRetryDelayMs } from "../utils/retry";
 import {
   buildPlanTree,
   scheduleTasks,
@@ -348,6 +349,76 @@ function stripAutoColumns(payload: unknown) {
   const { runId: _runId, nodeId: _nodeId, iteration: _iteration, ...rest } =
     payload as Record<string, unknown>;
   return rest;
+}
+
+function normalizeInputRow(row: any): Record<string, unknown> {
+  if (!row || typeof row !== "object") return {};
+  if ("payload" in row) {
+    const payload = (row as any).payload;
+    if (payload && typeof payload === "object") {
+      return payload as Record<string, unknown>;
+    }
+    return {};
+  }
+  const { runId: _runId, ...rest } = row as Record<string, unknown>;
+  return rest;
+}
+
+function normalizeOutputRow(row: any): unknown {
+  if (!row || typeof row !== "object") return row;
+  const keys = Object.keys(row);
+  const payloadOnly =
+    "payload" in row &&
+    keys.every(
+      (key) =>
+        key === "runId" ||
+        key === "nodeId" ||
+        key === "iteration" ||
+        key === "payload",
+    );
+  if (payloadOnly) {
+    return (row as any).payload ?? null;
+  }
+  return stripAutoColumns(row);
+}
+
+async function buildCacheContext(
+  db: any,
+  inputTable: any,
+  runId: string,
+  desc: TaskDescriptor,
+  descriptorMap: Map<string, TaskDescriptor>,
+  attempt: number,
+): Promise<Record<string, unknown>> {
+  const inputRow = await loadInput(db, inputTable, runId);
+  const ctx: Record<string, unknown> = {
+    input: normalizeInputRow(inputRow),
+    executionId: runId,
+    stepId: desc.nodeId,
+    attempt,
+    iteration: desc.iteration,
+    loop: { iteration: desc.iteration + 1 },
+  };
+  const needs =
+    desc.needs ??
+    (desc.dependsOn
+      ? Object.fromEntries(desc.dependsOn.map((id) => [id, id]))
+      : undefined);
+  if (needs) {
+    for (const [key, depId] of Object.entries(needs)) {
+      const dep = descriptorMap.get(depId);
+      if (!dep?.outputTable) continue;
+      const row = await selectOutputRow<any>(db, dep.outputTable as any, {
+        runId,
+        nodeId: dep.nodeId,
+        iteration: dep.iteration,
+      });
+      if (row !== undefined) {
+        ctx[key] = normalizeOutputRow(row);
+      }
+    }
+  }
+  return ctx;
 }
 
 function resolveRootDir(
@@ -750,8 +821,9 @@ async function computeTaskStates(
   tasks: TaskDescriptor[],
   eventBus: EventBus,
   ralphDone: Map<string, boolean>,
-): Promise<TaskStateMap> {
+): Promise<{ stateMap: TaskStateMap; retryWait: Map<string, number> }> {
   const stateMap: TaskStateMap = new Map();
+  const retryWait = new Map<string, number>();
   const existing = await adapter.listNodes(runId);
   const existingState = new Map<string, TaskState>();
   for (const node of existing) {
@@ -974,6 +1046,23 @@ async function computeTaskStates(
       continue;
     }
 
+    let waitingForRetry = false;
+    if (failedAttempts.length > 0 && desc.retryPolicy) {
+      const lastFailed = failedAttempts[0];
+      const delayMs = computeRetryDelayMs(
+        desc.retryPolicy,
+        lastFailed?.attempt ?? failedAttempts.length,
+      );
+      const finishedAtMs = lastFailed?.finishedAtMs ?? lastFailed?.startedAtMs;
+      if (delayMs > 0 && typeof finishedAtMs === "number") {
+        const nextRetryAtMs = finishedAtMs + delayMs;
+        if (nowMs() < nextRetryAtMs) {
+          retryWait.set(key, nextRetryAtMs);
+          waitingForRetry = true;
+        }
+      }
+    }
+
     stateMap.set(key, "pending");
     await adapter.insertNode({
       runId,
@@ -985,10 +1074,12 @@ async function computeTaskStates(
       outputTable: desc.outputTableName,
       label: desc.label ?? null,
     });
-    await maybeEmitStateEvent("pending", desc);
+    if (!waitingForRetry) {
+      await maybeEmitStateEvent("pending", desc);
+    }
   }
 
-  return stateMap;
+  return { stateMap, retryWait };
 }
 
 /**
@@ -1095,6 +1186,8 @@ async function executeTask(
   db: any,
   runId: string,
   desc: TaskDescriptor,
+  descriptorMap: Map<string, TaskDescriptor>,
+  inputTable: any,
   eventBus: EventBus,
   toolConfig: {
     rootDir: string;
@@ -1165,6 +1258,7 @@ async function executeTask(
   let effectiveAgent: any = null;
   // Resolve effective root once so both caching and execution share it.
   const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
+  const stepCacheEnabled = cacheEnabled || Boolean(desc.cachePolicy);
 
   // Ensure the worktree directory exists on disk before running the task.
   if (desc.worktreePath) {
@@ -1184,9 +1278,9 @@ async function executeTask(
       workflowName,
       taskRoot,
       hasAgent: Boolean(desc.agent),
-      cacheEnabled,
+      cacheEnabled: stepCacheEnabled,
     }, "engine:task");
-    if (cacheEnabled) {
+    if (stepCacheEnabled) {
       const schemaSig = schemaSignature(desc.outputTable as any);
       const outputSchemaSig = desc.outputSchema
         ? sha256Hex(describeSchemaShape(desc.outputTable as any, desc.outputSchema))
@@ -1198,39 +1292,99 @@ async function executeTask(
       // Incorporate JJ state so workspace changes invalidate cache as documented.
       const jjBase = await getJjPointer(taskRoot);
       cacheJjBase = jjBase ?? null;
-      const cacheBase = {
-        workflowName,
-        nodeId: desc.nodeId,
-        outputTableName: desc.outputTableName,
-        schemaSig,
-        outputSchemaSig,
-        agentSig,
-        toolsSig,
-        jjPointer: cacheJjBase,
-        prompt: desc.prompt ?? null,
-        payload: desc.staticPayload ?? null,
-      };
-      cacheKey = sha256Hex(JSON.stringify(cacheBase));
-      const cachedRow = await adapter.getCache(cacheKey);
-      if (cachedRow) {
-        const parsed = JSON.parse(cachedRow.payloadJson);
-        const valid = validateOutput(desc.outputTable as any, parsed);
-        if (valid.ok) {
-          payload = valid.data;
-          cached = true;
-          void runPromise(Metric.increment(cacheHits));
-          logInfo("cache hit for task output", {
+
+      let cacheBase: Record<string, unknown>;
+      let cacheKeyDisabled = false;
+      if (desc.cachePolicy) {
+        let cachePayload: unknown = null;
+        let cacheByOk = true;
+        try {
+          const ctx = await buildCacheContext(
+            db,
+            inputTable,
+            runId,
+            desc,
+            descriptorMap,
+            attemptNo,
+          );
+          if (desc.cachePolicy.by) {
+            cachePayload = desc.cachePolicy.by(ctx);
+          }
+        } catch (err) {
+          cacheByOk = false;
+          logWarning("cache by evaluation failed", {
             runId,
             nodeId: desc.nodeId,
             iteration: desc.iteration,
             attempt: attemptNo,
-            cacheKey,
+            error: err instanceof Error ? err.message : String(err),
           }, "engine:task-cache");
+        }
+        if (desc.cachePolicy.by && !cacheByOk) {
+          cacheKeyDisabled = true;
+        }
+        cacheBase = {
+          workflowName,
+          nodeId: desc.nodeId,
+          outputTableName: desc.outputTableName,
+          schemaSig,
+          outputSchemaSig,
+          agentSig,
+          toolsSig,
+          jjPointer: cacheJjBase,
+          cacheVersion: desc.cachePolicy.version ?? null,
+          cacheBy: cachePayload ?? null,
+        };
+      } else {
+        cacheBase = {
+          workflowName,
+          nodeId: desc.nodeId,
+          outputTableName: desc.outputTableName,
+          schemaSig,
+          outputSchemaSig,
+          agentSig,
+          toolsSig,
+          jjPointer: cacheJjBase,
+          prompt: desc.prompt ?? null,
+          payload: desc.staticPayload ?? null,
+        };
+      }
+      try {
+        if (!cacheKeyDisabled) {
+          cacheKey = sha256Hex(JSON.stringify(cacheBase));
+        }
+      } catch (err) {
+        cacheKey = null;
+        logWarning("cache key serialization failed", {
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          error: err instanceof Error ? err.message : String(err),
+        }, "engine:task-cache");
+      }
+      if (cacheKey) {
+        const cachedRow = await adapter.getCache(cacheKey);
+        if (cachedRow) {
+          const parsed = JSON.parse(cachedRow.payloadJson);
+          const valid = validateOutput(desc.outputTable as any, parsed);
+          if (valid.ok) {
+            payload = valid.data;
+            cached = true;
+            void runPromise(Metric.increment(cacheHits));
+            logInfo("cache hit for task output", {
+              runId,
+              nodeId: desc.nodeId,
+              iteration: desc.iteration,
+              attempt: attemptNo,
+              cacheKey,
+            }, "engine:task-cache");
+          } else {
+            void runPromise(Metric.increment(cacheMisses));
+          }
         } else {
           void runPromise(Metric.increment(cacheMisses));
         }
-      } else {
-        void runPromise(Metric.increment(cacheMisses));
       }
     }
 
@@ -1698,7 +1852,7 @@ async function executeTask(
       { runId, nodeId: desc.nodeId, iteration: desc.iteration },
       payload,
     );
-    if (cacheEnabled && cacheKey && !cached) {
+    if (stepCacheEnabled && cacheKey && !cached) {
       await adapter.insertCache({
         cacheKey,
         createdAtMs: nowMs(),
@@ -2377,7 +2531,7 @@ async function runWorkflowBody<Schema>(
       const singleRalphId = ralphs.length === 1 ? ralphs[0]!.id : null;
 
       const ralphDoneMap = buildRalphDoneMap(ralphs, ralphState);
-      const stateMap = await computeTaskStates(
+      const { stateMap, retryWait } = await computeTaskStates(
         adapter,
         db,
         runId,
@@ -2386,7 +2540,14 @@ async function runWorkflowBody<Schema>(
         ralphDoneMap,
       );
       const descriptorMap = buildDescriptorMap(tasks);
-      const schedule = scheduleTasks(plan, stateMap, descriptorMap, ralphState);
+      const schedule = scheduleTasks(
+        plan,
+        stateMap,
+        descriptorMap,
+        ralphState,
+        retryWait,
+        nowMs(),
+      );
 
       const runnable = applyConcurrencyLimits(
         schedule.runnable,
@@ -2500,6 +2661,17 @@ async function runWorkflowBody<Schema>(
           return { runId, status: "failed", error: errorMsg };
         }
 
+        if (schedule.pendingExists) {
+          const waitMs =
+            schedule.nextRetryAtMs != null
+              ? Math.max(0, schedule.nextRetryAtMs - nowMs())
+              : 100;
+          if (waitMs > 0) {
+            await Bun.sleep(waitMs);
+          }
+          continue;
+        }
+
         if (schedule.readyRalphs.length > 0) {
           for (const ralph of schedule.readyRalphs) {
             const state = ralphState.get(ralph.id) ?? {
@@ -2609,6 +2781,8 @@ async function runWorkflowBody<Schema>(
           db,
           runId,
           task,
+          descriptorMap,
+          inputTable,
           eventBus,
           toolConfig,
           workflowName,

@@ -33,6 +33,7 @@ export type ScheduleResult = {
   pendingExists: boolean;
   waitingApprovalExists: boolean;
   readyRalphs: RalphMeta[];
+  nextRetryAtMs?: number;
 };
 
 export type RalphMeta = {
@@ -142,16 +143,36 @@ function isTerminal(state: TaskState, desc: TaskDescriptor): boolean {
   return false;
 }
 
+function dependenciesSatisfied(
+  desc: TaskDescriptor,
+  states: TaskStateMap,
+  descriptors: Map<string, TaskDescriptor>,
+): boolean {
+  if (!desc.dependsOn || desc.dependsOn.length === 0) return true;
+  for (const dependencyId of desc.dependsOn) {
+    const dependency = descriptors.get(dependencyId);
+    if (!dependency) return false;
+    const state = states.get(key(dependency.nodeId, dependency.iteration));
+    if (!state || !isTerminal(state, dependency)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function scheduleTasks(
   plan: PlanNode | null,
   states: TaskStateMap,
   descriptors: Map<string, TaskDescriptor>,
   ralphState: RalphStateMap,
+  retryWait: Map<string, number>,
+  nowMs: number,
 ): ScheduleResult {
   const runnable: TaskDescriptor[] = [];
   let pendingExists = false;
   let waitingApprovalExists = false;
   const readyRalphs: RalphMeta[] = [];
+  let nextRetryAtMs: number | undefined;
 
   // Track current usage per parallel/merge-queue group based on in-progress tasks.
   // This allows the scheduler to admit at most `parallelMaxConcurrency` new
@@ -181,6 +202,16 @@ export function scheduleTasks(
         if (state === "pending" || state === "cancelled") pendingExists = true;
         const terminal = isTerminal(state, desc);
         if (!terminal && (state === "pending" || state === "cancelled")) {
+          if (!dependenciesSatisfied(desc, states, descriptors)) {
+            return { terminal };
+          }
+          const retryAt = retryWait.get(key(desc.nodeId, desc.iteration));
+          if (retryAt && retryAt > nowMs) {
+            pendingExists = true;
+            nextRetryAtMs =
+              nextRetryAtMs == null ? retryAt : Math.min(nextRetryAtMs, retryAt);
+            return { terminal };
+          }
           const gid = desc.parallelGroupId;
           const cap = desc.parallelMaxConcurrency;
           if (gid && cap != null) {
@@ -248,7 +279,13 @@ export function scheduleTasks(
     walk(plan);
   }
 
-  return { runnable, pendingExists, waitingApprovalExists, readyRalphs };
+  return {
+    runnable,
+    pendingExists,
+    waitingApprovalExists,
+    readyRalphs,
+    nextRetryAtMs,
+  };
 }
 
 export function buildStateKey(nodeId: string, iteration: number) {
