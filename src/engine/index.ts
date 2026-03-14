@@ -620,9 +620,28 @@ function resolveTaskOutputs(tasks: TaskDescriptor[], workflow: SmithersWorkflow<
       continue;
     }
 
+    // Resolve ZodObject via outputRef (output prop) first.
+    if (task.outputRef && workflow.zodToKeyName) {
+      const keyName = workflow.zodToKeyName.get(task.outputRef);
+      if (keyName && workflow.schemaRegistry) {
+        const entry = workflow.schemaRegistry.get(keyName);
+        if (entry) {
+          task.outputTable = entry.table;
+          task.outputTableName = keyName;
+          if (!task.outputSchema) task.outputSchema = entry.zodSchema;
+        }
+      }
+      if (!task.outputTable) {
+        throw new SmithersError(
+          "UNKNOWN_OUTPUT_SCHEMA",
+          `Task "${task.nodeId}" uses an output ZodObject that is not registered in createSmithers()`,
+        );
+      }
+    }
+
     const raw = task.outputSchema;
-    // Resolve ZodObject via zodToKeyName
-    if (raw && typeof raw === "object" && workflow.zodToKeyName) {
+    // Resolve ZodObject via outputSchema when no outputRef resolved.
+    if (!task.outputTable && raw && typeof raw === "object" && workflow.zodToKeyName) {
       const keyName = workflow.zodToKeyName.get(raw);
       if (keyName && workflow.schemaRegistry) {
         const entry = workflow.schemaRegistry.get(keyName);
@@ -1131,6 +1150,9 @@ async function executeTask(
     }, "engine:task");
     if (cacheEnabled) {
       const schemaSig = schemaSignature(desc.outputTable as any);
+      const outputSchemaSig = desc.outputSchema
+        ? sha256Hex(describeSchemaShape(desc.outputTable as any, desc.outputSchema))
+        : null;
       const agentSig = cacheAgent?.id ?? "agent";
       const toolsSig = cacheAgent?.tools
         ? Object.keys(cacheAgent.tools).sort().join(",")
@@ -1143,6 +1165,7 @@ async function executeTask(
         nodeId: desc.nodeId,
         outputTableName: desc.outputTableName,
         schemaSig,
+        outputSchemaSig,
         agentSig,
         toolsSig,
         jjPointer: cacheJjBase,
@@ -1644,6 +1667,9 @@ async function executeTask(
         nodeId: desc.nodeId,
         outputTable: desc.outputTableName,
         schemaSig: schemaSignature(desc.outputTable as any),
+        outputSchemaSig: desc.outputSchema
+          ? sha256Hex(describeSchemaShape(desc.outputTable as any, desc.outputSchema))
+          : null,
         agentSig: cacheAgent?.id ?? "agent",
         toolsSig: cacheAgent?.tools
           ? Object.keys(cacheAgent.tools).sort().join(",")

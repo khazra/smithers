@@ -5,15 +5,20 @@ export type TaskDescriptor = {
   ordinal: number;
   iteration: number;
   ralphId?: string;
+  dependsOn?: string[];
   worktreeId?: string;
   worktreePath?: string;
   worktreeBranch?: string;
   outputTable: any | null;
   outputTableName: string;
+  /** Zod schema reference from the Task output prop (used for schema resolution). */
+  outputRef?: import("zod").ZodObject<any>;
   outputSchema?: import("zod").ZodObject<any>;
   parallelGroupId?: string;
   parallelMaxConcurrency?: number;
   needsApproval: boolean;
+  approvalMode?: "gate" | "decision";
+  approvalOnDeny?: "fail" | "continue" | "skip";
   skipIf: boolean;
   retries: number;
   timeoutMs: number | null;

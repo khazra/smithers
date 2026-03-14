@@ -261,6 +261,50 @@ describe("docs: <Workflow>", () => {
     expect(calls).toBe(1);
     cleanup();
   });
+
+  test("cache key changes when outputSchema changes", async () => {
+    const { smithers, outputs, cleanup } = createTestSmithers({
+      output: z.object({ value: z.number() }),
+    });
+
+    let calls = 0;
+    const agent: any = {
+      id: "schema-cache-agent",
+      tools: {},
+      async generate() {
+        calls += 1;
+        return { output: { value: calls } };
+      },
+    };
+
+    const schemaA = z.object({ value: z.number().describe("v1") });
+    const schemaB = z.object({ value: z.number().describe("v2") });
+
+    const workflowA = smithers(() => (
+      <Workflow name="cache-schema" cache>
+        <Task id="cached" output={outputs.output} agent={agent} outputSchema={schemaA}>
+          Cached prompt
+        </Task>
+      </Workflow>
+    ));
+
+    const workflowB = smithers(() => (
+      <Workflow name="cache-schema" cache>
+        <Task id="cached" output={outputs.output} agent={agent} outputSchema={schemaB}>
+          Cached prompt
+        </Task>
+      </Workflow>
+    ));
+
+    const first = await runWorkflow(workflowA, { input: {}, runId: "cache-schema-1" });
+    expect(first.status).toBe("finished");
+
+    const second = await runWorkflow(workflowB, { input: {}, runId: "cache-schema-2" });
+    expect(second.status).toBe("finished");
+
+    expect(calls).toBe(2);
+    cleanup();
+  });
 });
 
 describe("docs: control flow components", () => {

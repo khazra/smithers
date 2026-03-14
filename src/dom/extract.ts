@@ -219,9 +219,8 @@ export function extractFromHost(
         : typeof outputRaw === "string"
           ? outputRaw
           : "";
-      const outputSchema =
-        raw.outputSchema ??
-        (!outputTable && isZodObject(outputRaw) ? outputRaw : undefined);
+      const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
+      const outputSchema = raw.outputSchema ?? outputRef;
       const needsApproval = Boolean(raw.needsApproval);
       const approvalMode =
         raw.approvalMode === "decision" ? "decision" : "gate";
@@ -269,6 +268,7 @@ export function extractFromHost(
         worktreeBranch: topWorktree?.branch,
         outputTable,
         outputTableName,
+        outputRef,
         outputSchema,
         dependsOn,
         needsApproval,
