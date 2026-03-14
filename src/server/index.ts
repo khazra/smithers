@@ -17,6 +17,10 @@ import { approveNode, denyNode } from "../engine/approvals";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { nowMs } from "../utils/time";
 import { errorToJson } from "../utils/errors";
+import {
+  prometheusContentType,
+  renderPrometheusMetrics,
+} from "../observability";
 
 type RunRecord = {
   workflow: SmithersWorkflow<any>;
@@ -156,6 +160,20 @@ function sendJson(res: ServerResponse, status: number, payload: any) {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.end(JSON.stringify(payload));
+  void runPromise(Metric.increment(httpRequests));
+}
+
+function sendText(
+  res: ServerResponse,
+  status: number,
+  payload: string,
+  contentType = "text/plain; charset=utf-8",
+) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.end(payload);
   void runPromise(Metric.increment(httpRequests));
 }
 
@@ -449,6 +467,15 @@ function startServerInternal(opts: ServerOptions = {}) {
       assertAuth(req, authToken);
       const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
       const method = req.method ?? "GET";
+
+      if (method === "GET" && url.pathname === "/metrics") {
+        return sendText(
+          res,
+          200,
+          renderPrometheusMetrics(),
+          prometheusContentType,
+        );
+      }
 
       function adapterForRun(runId: string): SmithersDb | null {
         if (serverAdapter) {
