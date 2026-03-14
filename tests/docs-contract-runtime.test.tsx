@@ -238,3 +238,57 @@ describe("docs: runWorkflow", () => {
     cleanup();
   });
 });
+
+describe("docs: events", () => {
+  test("onProgress receives core run and node lifecycle events", async () => {
+    const { smithers, outputs, cleanup } = createTestSmithers({
+      output: z.object({ value: z.number() }),
+    });
+
+    const events: string[] = [];
+    const workflow = smithers(() => (
+      <Workflow name="events">
+        <Task id="step" output={outputs.output}>
+          {{ value: 1 }}
+        </Task>
+      </Workflow>
+    ));
+
+    const result = await runWorkflow(workflow, {
+      input: {},
+      onProgress: (event) => events.push(event.type),
+    });
+    expect(result.status).toBe("finished");
+    expect(events).toContain("RunStarted");
+    expect(events).toContain("NodeStarted");
+    expect(events).toContain("NodeFinished");
+    expect(events).toContain("RunFinished");
+    cleanup();
+  });
+
+  test("needsApproval emits ApprovalRequested and waits", async () => {
+    const { smithers, outputs, cleanup } = createTestSmithers({
+      output: z.object({ value: z.number() }),
+    });
+
+    const events: string[] = [];
+    const workflow = smithers(() => (
+      <Workflow name="approval-events">
+        <Task id="gate" output={outputs.output} needsApproval>
+          {{ value: 1 }}
+        </Task>
+      </Workflow>
+    ));
+
+    const result = await runWorkflow(workflow, {
+      input: {},
+      onProgress: (event) => events.push(event.type),
+    });
+
+    expect(result.status).toBe("waiting-approval");
+    expect(events).toContain("ApprovalRequested");
+    expect(events).toContain("NodeWaitingApproval");
+    expect(events).toContain("RunStatusChanged");
+    cleanup();
+  });
+});
