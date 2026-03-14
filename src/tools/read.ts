@@ -26,6 +26,10 @@ export function readToolEffect(path: string) {
     );
     yield* assertPathWithinRootEffect(root, resolved);
     const max = ctx?.maxOutputBytes ?? 200_000;
+    const stats = yield* fs.stat(resolved);
+    if (Number(stats.size) > max) {
+      throw new Error(`File too large (${stats.size} bytes)`);
+    }
     const content = yield* fs.readFileString(resolved, "utf8");
     const output = truncateToBytes(content, max);
     yield* logToolCallEffect(
