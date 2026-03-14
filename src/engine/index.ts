@@ -341,6 +341,15 @@ function buildOutputRow(
   };
 }
 
+function stripAutoColumns(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const { runId: _runId, nodeId: _nodeId, iteration: _iteration, ...rest } =
+    payload as Record<string, unknown>;
+  return rest;
+}
+
 function resolveRootDir(
   opts: RunOptions,
   workflowPath?: string | null,
@@ -1518,20 +1527,7 @@ async function executeTask(
         payload = desc.staticPayload;
       }
 
-      if (payload && typeof payload === "object") {
-        if ("runId" in payload && (payload as any).runId !== runId) {
-          throw new Error("Payload runId does not match current run");
-        }
-        if ("nodeId" in payload && (payload as any).nodeId !== desc.nodeId) {
-          throw new Error("Payload nodeId does not match task id");
-        }
-        if (
-          "iteration" in payload &&
-          (payload as any).iteration !== desc.iteration
-        ) {
-          throw new Error("Payload iteration does not match task iteration");
-        }
-      }
+      payload = stripAutoColumns(payload);
       const payloadWithKeys = buildOutputRow(
         desc.outputTable as any,
         runId,
@@ -1606,16 +1602,17 @@ async function executeTask(
         }
 
         if (retryOutput && typeof retryOutput === "object") {
-          payload = retryOutput;
-          const retryPayload = {
-            ...retryOutput,
+          payload = stripAutoColumns(retryOutput);
+          const retryPayload = buildOutputRow(
+            desc.outputTable as any,
             runId,
-            nodeId: desc.nodeId,
-            iteration: desc.iteration,
-          };
+            desc.nodeId,
+            desc.iteration,
+            payload,
+          );
           validation = validateOutput(desc.outputTable as any, retryPayload);
           if (validation.ok && desc.outputSchema) {
-            const zodCheck = (desc.outputSchema as z.ZodType).safeParse(retryOutput);
+            const zodCheck = (desc.outputSchema as z.ZodType).safeParse(payload);
             if (!zodCheck.success) {
               validation = { ok: false, error: zodCheck.error };
             }

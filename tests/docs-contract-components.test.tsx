@@ -186,6 +186,47 @@ describe("docs: <Task>", () => {
     expect(seenPrompt).toContain("risk");
     cleanup();
   });
+
+  test("auto-populated columns are stripped from agent output", async () => {
+    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+      output: z.object({ value: z.number() }),
+    });
+
+    const agent: any = {
+      id: "extra-fields",
+      tools: {},
+      async generate() {
+        return {
+          output: {
+            value: 99,
+            runId: "wrong-run",
+            nodeId: "wrong-node",
+            iteration: 123,
+          },
+        };
+      },
+    };
+
+    const workflow = smithers(() => (
+      <Workflow name="strip-columns">
+        <Task id="strip" output={outputs.output} agent={agent}>
+          Return with extra fields.
+        </Task>
+      </Workflow>
+    ));
+
+    const runId = "strip-run";
+    const result = await runWorkflow(workflow, { input: {}, runId });
+    expect(result.status).toBe("finished");
+
+    const rows = await (db as any).select().from(tables.output);
+    expect(rows.length).toBe(1);
+    expect(rows[0]?.value).toBe(99);
+    expect(rows[0]?.runId).toBe(runId);
+    expect(rows[0]?.nodeId).toBe("strip");
+    expect(rows[0]?.iteration).toBe(0);
+    cleanup();
+  });
 });
 
 describe("docs: control flow components", () => {
@@ -397,40 +438,43 @@ describe("docs: control flow components", () => {
 
   test("<Loop> exposes ctx.iteration and ctx.iterations", async () => {
     const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
-      output: z.object({ iteration: z.number(), mapValue: z.number() }),
+      loopOutput: z.object({ iter: z.number() }),
+      afterOutput: z.object({ mapValue: z.number() }),
     });
 
     const workflow = smithers((ctx) => (
       <Workflow name="loop-ctx">
-        <Loop id="review-loop" until={ctx.outputs("output").length >= 3}>
-          <Task id="step" output={outputs.output}>
-            {{
-              iteration: ctx.iteration,
-              mapValue: ctx.iterations?.["review-loop"] ?? -1,
-            }}
+        <Sequence>
+          <Loop id="review-loop" until={ctx.outputs("loopOutput").length >= 3}>
+            <Task id="step" output={outputs.loopOutput}>
+              {{ iter: ctx.iteration }}
+            </Task>
+          </Loop>
+          <Task id="after" output={outputs.afterOutput}>
+            {{ mapValue: ctx.iterations?.["review-loop"] ?? -1 }}
           </Task>
-        </Loop>
+        </Sequence>
       </Workflow>
     ));
 
     const result = await runWorkflow(workflow, { input: {} });
     expect(result.status).toBe("finished");
 
-    const rows = await (db as any).select().from(tables.output);
-    const byIter = rows.sort((a: any, b: any) => a.iteration - b.iteration);
+    const loopRows = await (db as any).select().from(tables.loopOutput);
+    const byIter = loopRows.sort((a: any, b: any) => a.iteration - b.iteration);
     expect(byIter.length).toBe(3);
-    expect(byIter[0].iteration).toBe(0);
-    expect(byIter[0].mapValue).toBe(0);
-    expect(byIter[1].iteration).toBe(1);
-    expect(byIter[1].mapValue).toBe(1);
-    expect(byIter[2].iteration).toBe(2);
-    expect(byIter[2].mapValue).toBe(2);
+    expect(byIter[0].iter).toBe(0);
+    expect(byIter[1].iter).toBe(1);
+    expect(byIter[2].iter).toBe(2);
+
+    const afterRows = await (db as any).select().from(tables.afterOutput);
+    expect(afterRows[0]?.mapValue).toBe(2);
     cleanup();
   });
 
   test("ctx.iterationCount counts completed iterations", async () => {
     const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
-      output: z.object({ count: z.number(), iteration: z.number() }),
+      output: z.object({ count: z.number(), iter: z.number() }),
     });
 
     const workflow = smithers((ctx) => (
@@ -443,7 +487,7 @@ describe("docs: control flow components", () => {
           <Task id="step" output={outputs.output}>
             {{
               count: ctx.iterationCount("output", "step"),
-              iteration: ctx.iteration,
+              iter: ctx.iteration,
             }}
           </Task>
         </Loop>
