@@ -250,7 +250,7 @@ async function ensureWorktree(
 
 const DEFAULT_MAX_CONCURRENCY = 4;
 const STALE_ATTEMPT_MS = 15 * 60 * 1000;
-const DEFAULT_TOOL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — agents need time for builds/tests
+const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 const RUN_HEARTBEAT_MS = 1_000;
 const RUN_HEARTBEAT_STALE_MS = 5_000;
