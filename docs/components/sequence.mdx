@@ -27,13 +27,13 @@ import { Sequence } from "smithers-orchestrator";
 ```tsx
 <Workflow name="pipeline">
   <Sequence>
-    <Task id="fetch" output="fetch">
+    <Task id="fetch" output={outputs.fetch}>
       {{ url: "https://api.example.com/data" }}
     </Task>
-    <Task id="transform" output="transform" agent={transformer}>
-      {`Transform the data: ${ctx.output("fetch", { nodeId: "fetch" }).url}`}
+    <Task id="transform" output={outputs.transform} agent={transformer}>
+      {`Transform the data: ${ctx.output(outputs.fetch, { nodeId: "fetch" }).url}`}
     </Task>
-    <Task id="store" output="store">
+    <Task id="store" output={outputs.store}>
       {{ stored: true }}
     </Task>
   </Sequence>
@@ -51,18 +51,18 @@ In this example, `fetch` runs first. Only after it completes does `transform` st
   <Parallel maxConcurrency={2}>
     {/* Each branch runs its own steps in order */}
     <Sequence>
-      <Task id="build-frontend" output="buildFrontend">
+      <Task id="build-frontend" output={outputs.buildFrontend}>
         {{ status: "built" }}
       </Task>
-      <Task id="test-frontend" output="testFrontend">
+      <Task id="test-frontend" output={outputs.testFrontend}>
         {{ passed: true }}
       </Task>
     </Sequence>
     <Sequence>
-      <Task id="build-backend" output="buildBackend">
+      <Task id="build-backend" output={outputs.buildBackend}>
         {{ status: "built" }}
       </Task>
-      <Task id="test-backend" output="testBackend">
+      <Task id="test-backend" output={outputs.testBackend}>
         {{ passed: true }}
       </Task>
     </Sequence>
@@ -78,10 +78,10 @@ Use `skipIf` to conditionally bypass an entire group of tasks:
 
 ```tsx
 <Sequence skipIf={ctx.input.skipTests}>
-  <Task id="unit-tests" output="unitTests">
+  <Task id="unit-tests" output={outputs.unitTests}>
     {{ passed: true }}
   </Task>
-  <Task id="integration-tests" output="integrationTests">
+  <Task id="integration-tests" output={outputs.integrationTests}>
     {{ passed: true }}
   </Task>
 </Sequence>

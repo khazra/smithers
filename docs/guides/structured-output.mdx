@@ -15,7 +15,7 @@ import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   analysis: z.object({
     summary: z.string(),
     issues: z.array(z.string()),
@@ -30,7 +30,7 @@ const analyst = new Agent({
 
 export default smithers((ctx) => (
   <Workflow name="structured-output">
-    <Task id="analyze" output="analysis" agent={analyst}>
+    <Task id="analyze" output={outputs.analysis} agent={analyst}>
       {`Analyze this codebase: ${ctx.input.target}.
 Return JSON with:
 - summary (string)
@@ -48,6 +48,7 @@ The `outputSchema` prop provides additional schema information to the agent. Whe
 ```tsx
 import { z } from "zod";
 
+// assuming outputs from createSmithers
 const analysisSchema = z.object({
   summary: z.string(),
   risk: z.enum(["low", "medium", "high"]),
@@ -55,7 +56,7 @@ const analysisSchema = z.object({
 });
 
 // The AnalysisPrompt component receives props.schema automatically
-<Task id="analyze" output="analysis" agent={analyst} outputSchema={analysisSchema}>
+<Task id="analyze" output={outputs.analysis} agent={analyst} outputSchema={analysisSchema}>
   <AnalysisPrompt repo={ctx.input.repoPath} />
 </Task>
 ```
@@ -130,7 +131,8 @@ const analysisSchema = z.object({
 Help the agent produce valid output by being explicit in your prompts:
 
 ```tsx
-<Task id="analyze" output="analysis" agent={analyst}>
+{/* assuming outputs from createSmithers */}
+<Task id="analyze" output={outputs.analysis} agent={analyst}>
   {`Analyze the following code for security vulnerabilities.
 
 Return a JSON object with these fields:
@@ -156,7 +158,8 @@ Tasks without an `agent` prop are static -- the children value is written direct
 
 ```tsx
 // Static payload -- validated against the output table schema
-<Task id="config" output="config">
+// assuming outputs from createSmithers
+<Task id="config" output={outputs.config}>
   {{ environment: "production", version: 3 }}
 </Task>
 ```
@@ -169,7 +172,7 @@ For columns that store arrays or complex objects, use Drizzle's `{ mode: "json" 
 
 ```tsx
 // With createSmithers -- automatic
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   analysis: z.object({
     issues: z.array(z.string()), // stored as JSON text automatically
   }),

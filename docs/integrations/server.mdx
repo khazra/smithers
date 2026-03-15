@@ -37,6 +37,7 @@ The HTTP server participates in the same observability pipeline as local workflo
 - requests increment `smithers.http.requests`
 - latency records into `smithers.http.request_duration_ms`
 - request handling, workflow loading, and body parsing are wrapped in spans
+- the server exposes a direct Prometheus scrape endpoint at `/metrics`
 
 To export those signals, enable the OTLP runtime with environment variables:
 
@@ -106,7 +107,39 @@ Unauthenticated requests receive a `401` response:
 
 ## API Routes
 
-All routes use JSON request/response bodies (except the SSE endpoint). Responses include `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff` headers.
+All routes use JSON request/response bodies except:
+
+- `GET /v1/runs/:runId/events`, which uses Server-Sent Events
+- `GET /metrics`, which returns Prometheus text exposition
+
+JSON responses include `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff` headers.
+
+### GET /metrics
+
+Expose the current Smithers runtime metrics in Prometheus text format.
+
+**Response (200):**
+
+```txt
+# TYPE smithers_http_requests counter
+smithers_http_requests 12
+```
+
+**Headers:**
+
+| Header | Value |
+| --- | --- |
+| `Content-Type` | `text/plain; version=0.0.4; charset=utf-8` |
+| `Cache-Control` | `no-store` |
+
+Prometheus can scrape the server directly:
+
+```yaml
+scrape_configs:
+  - job_name: smithers
+    static_configs:
+      - targets: ["localhost:7331"]
+```
 
 ### POST /v1/runs
 

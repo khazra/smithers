@@ -59,7 +59,7 @@ import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   analysis: z.object({ summary: z.string(), risk: z.enum(["low", "medium", "high"]) }),
   report: z.object({ title: z.string(), body: z.string() }),
 });
@@ -71,11 +71,11 @@ const analyst = new Agent({
 
 export default smithers((ctx) => (
   <Workflow name="quick-review">
-    <Task id="analyze" output="analysis" agent={analyst}>
+    <Task id="analyze" output={outputs.analysis} agent={analyst}>
       {`Analyze: ${ctx.input.target}`}
     </Task>
-    <Task id="report" output="report">
-      {{ title: "Review Complete", body: ctx.output("analysis", { nodeId: "analyze" }).summary }}
+    <Task id="report" output={outputs.report}>
+      {{ title: "Review Complete", body: ctx.output(outputs.analysis, { nodeId: "analyze" }).summary }}
     </Task>
   </Workflow>
 ));
@@ -126,7 +126,7 @@ Then use it in your workflow:
 import { createSmithers, Task, Sequence } from "smithers-orchestrator";
 import { schemas } from "./schemas";
 
-const { Workflow, smithers } = createSmithers(schemas);
+const { Workflow, smithers, outputs } = createSmithers(schemas);
 ```
 
 ## Task ID Naming Conventions
@@ -136,14 +136,15 @@ Task IDs must be unique within a workflow and should be descriptive. Follow thes
 **Simple tasks**: use a short, descriptive name.
 
 ```tsx
-<Task id="analyze" output="analysis" agent={analyst}>
+<Task id="analyze" output={outputs.analysis} agent={analyst}>
 ```
 
 **Dynamic tasks** (generated from arrays): use a prefix with a unique identifier.
 
 ```tsx
+{/* assuming outputs from createSmithers */}
 {tickets.map((ticket) => (
-  <Task key={ticket.id} id={`${ticket.id}:implement`} output="implement" agent={implementer}>
+  <Task key={ticket.id} id={`${ticket.id}:implement`} output={outputs.implement} agent={implementer}>
     {`Implement ticket ${ticket.id}: ${ticket.title}`}
   </Task>
 ))}
@@ -152,8 +153,9 @@ Task IDs must be unique within a workflow and should be descriptive. Follow thes
 **Iteration-aware tasks** (inside Loop): the task ID stays the same across iterations. Smithers differentiates them by the `iteration` column.
 
 ```tsx
+{/* assuming outputs from createSmithers */}
 <Loop until={approved} maxIterations={3}>
-  <Task id="review" output="review" agent={reviewer}>
+  <Task id="review" output={outputs.review} agent={reviewer}>
     Review the implementation.
   </Task>
 </Loop>
@@ -268,6 +270,7 @@ Use it in your component:
 import { Task } from "smithers-orchestrator";
 import { render } from "../lib/render";
 import { reviewer } from "../agents";
+import { outputs } from "../schemas"; // assuming outputs from createSmithers
 import ReviewPrompt from "../prompts/review.mdx";
 
 export function Review({ ticket, summary, files }: {
@@ -276,7 +279,7 @@ export function Review({ ticket, summary, files }: {
   files: string[];
 }) {
   return (
-    <Task id={`${ticket.title}:review`} output="review" agent={reviewer}>
+    <Task id={`${ticket.title}:review`} output={outputs.review} agent={reviewer}>
       {render(ReviewPrompt, { ticket, summary, files })}
     </Task>
   );
@@ -288,20 +291,21 @@ export function Review({ ticket, summary, files }: {
 Use `ctx.output()` when you are certain the output exists (the task has completed). Use `ctx.outputMaybe()` for conditional rendering:
 
 ```tsx
+// assuming outputs from createSmithers
 export default smithers((ctx) => {
   // outputMaybe returns undefined if not yet available -- safe for conditionals
-  const analysis = ctx.outputMaybe("analysis", { nodeId: "analyze" });
+  const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
 
   return (
     <Workflow name="example">
       <Sequence>
-        <Task id="analyze" output="analysis" agent={analyst}>
+        <Task id="analyze" output={outputs.analysis} agent={analyst}>
           {`Analyze: ${ctx.input.description}`}
         </Task>
 
         {/* Only mounts after analyze completes */}
         {analysis ? (
-          <Task id="report" output="report">
+          <Task id="report" output={outputs.report}>
             {{ summary: analysis.summary, risk: analysis.risk }}
           </Task>
         ) : null}
@@ -315,9 +319,10 @@ Use `ctx.output()` (throws on missing) only when you are certain the task has fi
 
 ```tsx
 // Safe because report only mounts after analysis exists
+// assuming outputs from createSmithers
 {analysis ? (
-  <Task id="report" output="report">
-    {{ summary: ctx.output("analysis", { nodeId: "analyze" }).summary }}
+  <Task id="report" output={outputs.report}>
+    {{ summary: ctx.output(outputs.analysis, { nodeId: "analyze" }).summary }}
   </Task>
 ) : null}
 ```

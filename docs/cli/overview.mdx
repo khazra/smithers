@@ -310,9 +310,13 @@ Every command (except `--version` and `--help`) takes a `<workflow.tsx>` path as
 
 ```tsx
 // workflow.tsx
+const { Workflow, smithers, outputs } = createSmithers({
+  result: z.object({ summary: z.string() }),
+});
+
 export default smithers((ctx) => (
   <Workflow name="my-workflow">
-    <Task id="step1" output="result" agent={myAgent}>
+    <Task id="step1" output={outputs.result} agent={myAgent}>
       {`Do something with: ${ctx.input.description}`}
     </Task>
   </Workflow>

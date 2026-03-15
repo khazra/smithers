@@ -60,7 +60,7 @@ code-review/
 import { createSmithers, Task, Sequence } from "smithers-orchestrator";
 import { z } from "zod";
 
-const { Workflow, smithers, useCtx } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   analysis: z.object({
     summary: z.string(),
     issues: z.array(z.object({
@@ -86,7 +86,7 @@ const { Workflow, smithers, useCtx } = createSmithers({
 
 Three things happened here:
 
-1. **`analysis`, `fix`, and `report`** are now registered output names. You reference them as strings in `<Task output="analysis">`.
+1. **`outputs`** gives you typed references to each schema — use `outputs.analysis` instead of the string `"analysis"`. Typos become compile-time errors.
 2. **SQLite tables** are auto-created with the correct columns, plus auto-populated `runId`, `nodeId`, and `iteration` columns.
 3. **`Workflow`** and **`smithers`** are returned pre-configured for this schema set.
 
@@ -123,15 +123,15 @@ Now compose the tasks. Tasks inside `<Workflow>` run sequentially by default (to
 // workflow.tsx (continued)
 export default smithers((ctx) => {
   // Read the analysis output (undefined until the task completes)
-  const analysis = ctx.outputMaybe("analysis", { nodeId: "analyze" });
+  const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
   // Read the fix output
-  const fix = ctx.outputMaybe("fix", { nodeId: "fix" });
+  const fix = ctx.outputMaybe(outputs.fix, { nodeId: "fix" });
 
   return (
     <Workflow name="code-review">
       <Sequence>
         {/* Step 1: Analyze the codebase */}
-        <Task id="analyze" output="analysis" agent={analyst}>
+        <Task id="analyze" output={outputs.analysis} agent={analyst}>
           {`Review this code for bugs and issues:
 
 Repository: ${ctx.input.repo}
@@ -144,7 +144,7 @@ Return JSON with:
 
         {/* Step 2: Generate a fix (only renders after analysis completes) */}
         {analysis ? (
-          <Task id="fix" output="fix" agent={fixer}>
+          <Task id="fix" output={outputs.fix} agent={fixer}>
             {`Fix these issues:
 
 ${analysis.issues.map((i) => `- [${i.severity}] ${i.file}:${i.line} - ${i.description}`).join("\n")}
@@ -158,7 +158,7 @@ Return JSON with:
 
         {/* Step 3: Generate a summary report */}
         {fix ? (
-          <Task id="report" output="report" agent={reporter}>
+          <Task id="report" output={outputs.report} agent={reporter}>
             {`Write a code review report.
 
 Analysis summary: ${analysis!.summary}
@@ -181,10 +181,10 @@ Return JSON with:
 
 Key points about this workflow:
 
-- **`ctx.outputMaybe()`** returns `undefined` if the task has not completed yet. This is safe for conditional rendering.
+- **`ctx.outputMaybe()`** returns `undefined` if the task has not completed yet. This is safe for conditional rendering. Pass the schema reference (e.g. `outputs.analysis`) for type-safe access.
 - **Conditional rendering** (`{analysis ? <Task ... /> : null}`) controls task visibility. The `fix` task only mounts after `analyze` finishes and provides output.
 - **`ctx.input`** contains the input object you pass at run time. Here we expect `{ repo: string, focusArea?: string }`.
-- **Output keys** like `"analysis"` match the schema names passed to `createSmithers`.
+- **`outputs`** references are type-checked — a typo like `outputs.anaylsis` is a compile error, not a runtime surprise.
 
 ## Step 5: Create the Runner
 
@@ -267,7 +267,7 @@ sqlite3 smithers.db "SELECT * FROM report WHERE run_id = 'smth_a1b2c3d4';"
 Here is the execution flow:
 
 1. **Render 1**: Smithers renders the JSX tree. Only `analyze` is mounted (the other tasks are guarded by `null` checks). The engine executes `analyze`.
-2. **Render 2**: `ctx.outputMaybe("analysis", ...)` now returns the persisted row. The `fix` task mounts. The engine executes `fix`.
+2. **Render 2**: `ctx.outputMaybe(outputs.analysis, ...)` now returns the persisted row. The `fix` task mounts. The engine executes `fix`.
 3. **Render 3**: Both `analysis` and `fix` are available. The `report` task mounts. The engine executes `report`.
 4. **Render 4**: All tasks are finished. No runnable tasks remain. The run completes with status `"finished"`.
 

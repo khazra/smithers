@@ -16,7 +16,7 @@ import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   research: z.object({
     summary: z.string(),
     keyPoints: z.array(z.string()),
@@ -38,17 +38,17 @@ const writer = new Agent({
 });
 
 export default smithers((ctx) => {
-  const research = ctx.outputMaybe("research", { nodeId: "research" });
+  const research = ctx.outputMaybe(outputs.research, { nodeId: "research" });
 
   return (
     <Workflow name="research-report">
       <Sequence>
-        <Task id="research" output="research" agent={researcher}>
+        <Task id="research" output={outputs.research} agent={researcher}>
           {`Research the following topic and return a summary with key points.\n\nTopic: ${ctx.input.topic}`}
         </Task>
 
         {research ? (
-          <Task id="report" output="report" agent={writer}>
+          <Task id="report" output={outputs.report} agent={writer}>
             {`Write a concise report.\n\nSummary: ${research.summary}\nKey points: ${research.keyPoints.join(", ")}`}
           </Task>
         ) : null}

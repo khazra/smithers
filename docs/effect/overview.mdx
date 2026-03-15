@@ -24,17 +24,15 @@ input:
   ticketId: string
   description: string
 
-steps:
+steps[2]:
   - id: analyze
-    prompt: |
-      Analyze the bug: {input.description}
+    prompt: "Analyze the bug: {input.description}"
     output:
       summary: string
       severity: "low" | "medium" | "high"
 
   - id: fix
-    prompt: |
-      Fix based on analysis: {analyze.summary}
+    prompt: "Fix based on analysis: {analyze.summary}"
     output:
       patch: string
       explanation: string

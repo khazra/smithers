@@ -83,7 +83,8 @@ const codeAgent = new Agent({
 ```
 
 ```tsx
-<Task id="review" output="review" agent={codeAgent}>
+{/* outputs comes from createSmithers() */}
+<Task id="review" output={outputs.review} agent={codeAgent}>
   Read the file src/auth.ts and identify any security vulnerabilities.
 </Task>
 ```
@@ -257,7 +258,8 @@ const devAgent = new Agent({
 ```
 
 ```tsx
-<Task id="lint" output="lint" agent={devAgent}>
+{/* outputs comes from createSmithers() */}
+<Task id="lint" output={outputs.lint} agent={devAgent}>
   Run the linter on src/ and report any issues.
 </Task>
 ```
@@ -279,9 +281,13 @@ const codeAgent = new Agent({
   instructions: "You are a senior engineer. Use the available tools to complete tasks.",
 });
 
+const { Workflow, smithers, outputs } = createSmithers({
+  result: z.object({ summary: z.string() }),
+});
+
 export default smithers((ctx) => (
   <Workflow name="refactor">
-    <Task id="refactor" output="result" agent={codeAgent}>
+    <Task id="refactor" output={outputs.result} agent={codeAgent}>
       {`Refactor the function in ${ctx.input.file} to improve readability.`}
     </Task>
   </Workflow>

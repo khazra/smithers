@@ -183,13 +183,13 @@ TOON workflows can use Effect services through `handler:` functions and the `imp
 
 ```toon
 imports:
-  services:
-    - from: "./services/coder.ts"
-      use: [Coder]
+  services[1]:
+    - from: ./services/coder.ts
+      use[1]: Coder
 
-steps:
+steps[1]:
   - id: analyze
-    handler: "./handlers/analyze.ts#analyzeWithCoder"
+    handler: ./handlers/analyze.ts#analyzeWithCoder
     output:
       summary: string
       severity: "low" | "medium" | "high"

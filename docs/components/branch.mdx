@@ -28,19 +28,19 @@ import { Branch } from "smithers-orchestrator";
 
 ```tsx
 <Workflow name="deploy-pipeline">
-  <Task id="test" output="test">
+  <Task id="test" output={outputs.test}>
     {{ passed: true, error: null }}
   </Task>
 
   <Branch
-    if={ctx.output("test", { nodeId: "test" }).passed}
+    if={ctx.output(outputs.test, { nodeId: "test" }).passed}
     then={
-      <Task id="deploy" output="deploy">
+      <Task id="deploy" output={outputs.deploy}>
         {{ url: "https://prod.example.com" }}
       </Task>
     }
     else={
-      <Task id="notify-failure" output="notifyFailure">
+      <Task id="notify-failure" output={outputs.notifyFailure}>
         {{ message: "Tests failed, skipping deploy." }}
       </Task>
     }
@@ -58,7 +58,7 @@ The `else` prop is optional. When omitted and the condition is `false`, nothing 
 <Branch
   if={ctx.input.needsReview}
   then={
-    <Task id="review" output="review" agent={reviewAgent}>
+    <Task id="review" output={outputs.review} agent={reviewAgent}>
       Review the changes.
     </Task>
   }
@@ -71,19 +71,19 @@ Each branch can contain any workflow element, not just a single `<Task>`. Use `<
 
 ```tsx
 <Branch
-  if={ctx.output("triage", { nodeId: "triage" }).severity === "critical"}
+  if={ctx.output(outputs.triage, { nodeId: "triage" }).severity === "critical"}
   then={
     <Sequence>
-      <Task id="hotfix" output="hotfix" agent={codeAgent}>
+      <Task id="hotfix" output={outputs.hotfix} agent={codeAgent}>
         Write a hotfix for the critical issue.
       </Task>
-      <Task id="emergency-deploy" output="emergencyDeploy">
+      <Task id="emergency-deploy" output={outputs.emergencyDeploy}>
         {{ deployed: true }}
       </Task>
     </Sequence>
   }
   else={
-    <Task id="add-to-backlog" output="backlog">
+    <Task id="add-to-backlog" output={outputs.backlog}>
       {{ queued: true }}
     </Task>
   }
@@ -98,7 +98,7 @@ Use `skipIf` to bypass the entire branch, regardless of the `if` condition:
 <Branch
   skipIf={ctx.input.dryRun}
   if={testsPass}
-  then={<Task id="deploy" output="deploy">{{ ok: true }}</Task>}
+  then={<Task id="deploy" output={outputs.deploy}>{{ ok: true }}</Task>}
 />
 ```
 
@@ -113,13 +113,13 @@ Because Smithers re-renders the workflow tree each frame, branch conditions can 
 ```tsx
 export default smithers(db, (ctx) => (
   <Workflow name="adaptive">
-    <Task id="check" output="check" agent={checkAgent}>
+    <Task id="check" output={outputs.check} agent={checkAgent}>
       Check whether the system is healthy.
     </Task>
     <Branch
-      if={ctx.outputMaybe("check", { nodeId: "check" })?.healthy === true}
-      then={<Task id="proceed" output="proceed">{{ ok: true }}</Task>}
-      else={<Task id="remediate" output="remediate" agent={fixAgent}>Fix it.</Task>}
+      if={ctx.outputMaybe(outputs.check, { nodeId: "check" })?.healthy === true}
+      then={<Task id="proceed" output={outputs.proceed}>{{ ok: true }}</Task>}
+      else={<Task id="remediate" output={outputs.remediate} agent={fixAgent}>Fix it.</Task>}
     />
   </Workflow>
 ));

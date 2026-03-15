@@ -23,12 +23,57 @@ Instead of:
 needsApproval: true
 ```
 
-approvals are explicit nodes in both TOON and the Effect builder.
+approvals are explicit nodes in JSX, TOON, and the Effect builder.
+
+**In JSX:**
+
+```tsx
+import {
+  Approval,
+  Sequence,
+  Task,
+  Workflow,
+  approvalDecisionSchema,
+  createSmithers,
+} from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  approval: approvalDecisionSchema,
+  published: z.object({ status: z.string() }),
+});
+
+export default smithers((ctx) => {
+  const approval = ctx.outputMaybe("approval", { nodeId: "approve-deploy" });
+
+  return (
+    <Workflow name="deploy">
+      <Sequence>
+        <Approval
+          id="approve-deploy"
+          output={outputs.approval}
+          request={{
+            title: "Deploy to production?",
+            summary: "Human review required before release.",
+          }}
+          onDeny="continue"
+        />
+
+        {approval ? (
+          <Task id="record" output={outputs.published}>
+            {{ status: approval.approved ? "approved" : "rejected" }}
+          </Task>
+        ) : null}
+      </Sequence>
+    </Workflow>
+  );
+});
+```
 
 **In TOON:**
 
 ```toon
-steps:
+steps[3]:
   - id: build
     prompt: Build the deployment package.
     output:
@@ -37,14 +82,14 @@ steps:
 
   - kind: approval
     id: approve-deploy
-    needs: [build]
+    needs[1]: build
     request:
       title: "Deploy {build.version}?"
       summary: "Commit {build.commitSha} passed all checks."
     onDeny: fail
 
   - id: deploy
-    needs: [build, approve-deploy]
+    needs[2]: build,approve-deploy
     prompt: Deploy version {build.version}.
     output:
       url: string

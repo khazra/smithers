@@ -118,7 +118,7 @@ Other useful props for tool-agent tasks:
 ```tsx
 <Task
   id="search"
-  output="searchResult"
+  output={outputs.searchResult}
   agent={codeSearchAgent}
   timeoutMs={60_000}
   retries={2}

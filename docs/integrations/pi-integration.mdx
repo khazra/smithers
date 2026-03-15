@@ -27,7 +27,8 @@ const pi = new PiAgent({
   mode: "text",
 });
 
-<Task id="implementation" output="implementation" agent={pi}>
+{/* outputs comes from createSmithers() */}
+<Task id="implementation" output={outputs.implementation} agent={pi}>
   {`Implement feature X and explain tradeoffs.`}
 </Task>
 ```

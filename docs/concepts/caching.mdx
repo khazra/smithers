@@ -19,15 +19,15 @@ Caching belongs on the step that produces reusable work.
 **In TOON:**
 
 ```toon
-steps:
+steps[1]:
   - id: analyze
     prompt: Analyze {input.description}.
     output:
       summary: string
       severity: "low" | "medium" | "high"
     cache:
-      by: [input.ticketId, input.description]
-      version: "analysis-v1"
+      by[2]: input.ticketId,input.description
+      version: analysis-v1
 ```
 
 **In the Effect builder:**

@@ -10,7 +10,8 @@ Smithers provides several mechanisms for handling errors at the task level. You 
 Set the `retries` prop to retry a task on failure. The value is the number of additional attempts after the first failure (so `retries={2}` means up to 3 total attempts):
 
 ```tsx
-<Task id="analyze" output="analysis" agent={analyst} retries={2}>
+{/* assuming outputs from createSmithers */}
+<Task id="analyze" output={outputs.analysis} agent={analyst} retries={2}>
   Analyze the codebase and return structured JSON.
 </Task>
 ```
@@ -30,7 +31,8 @@ If schema retries also fail, the attempt fails and the `retries` mechanism takes
 Set `timeoutMs` to limit how long a single attempt can take:
 
 ```tsx
-<Task id="analyze" output="analysis" agent={analyst} timeoutMs={60_000} retries={1}>
+{/* assuming outputs from createSmithers */}
+<Task id="analyze" output={outputs.analysis} agent={analyst} timeoutMs={60_000} retries={1}>
   Analyze the codebase.
 </Task>
 ```
@@ -42,11 +44,12 @@ If the task exceeds the timeout, the attempt fails with a timeout error. If `ret
 By default, when a task fails (after exhausting all retries), the workflow stops. Set `continueOnFail` to allow subsequent tasks to proceed:
 
 ```tsx
-<Task id="optional-lint" output="lint" agent={linter} retries={1} continueOnFail>
+{/* assuming outputs from createSmithers */}
+<Task id="optional-lint" output={outputs.lint} agent={linter} retries={1} continueOnFail>
   Run lint checks on the codebase.
 </Task>
 
-<Task id="report" output="report" agent={reporter}>
+<Task id="report" output={outputs.report} agent={reporter}>
   Generate the final report.
 </Task>
 ```
@@ -60,9 +63,10 @@ This is useful for non-critical steps like linting, optional analysis passes, or
 Set `skipIf` to conditionally skip a task at render time:
 
 ```tsx
+{/* assuming outputs from createSmithers */}
 <Task
   id="deep-analysis"
-  output="analysis"
+  output={outputs.analysis}
   agent={analyst}
   skipIf={ctx.input.mode === "quick"}
 >
@@ -76,10 +80,11 @@ When `skipIf` evaluates to `true`, the task is marked `skipped` immediately. It 
 
 ```tsx
 // Preferred: conditional rendering
-const analysis = ctx.outputMaybe("analysis", { nodeId: "analyze" });
+// assuming outputs from createSmithers
+const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
 
 {analysis ? (
-  <Task id="fix" output="fix" agent={fixer}>
+  <Task id="fix" output={outputs.fix} agent={fixer}>
     {`Fix these issues: ${analysis.summary}`}
   </Task>
 ) : null}
@@ -95,7 +100,7 @@ import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   risky: z.object({
     ok: z.boolean(),
     message: z.string(),
@@ -111,25 +116,25 @@ const riskyAgent = new Agent({
 });
 
 export default smithers((ctx) => {
-  const risky = ctx.outputMaybe("risky", { nodeId: "risky" });
+  const risky = ctx.outputMaybe(outputs.risky, { nodeId: "risky" });
   const ok = risky?.ok ?? false;
 
   return (
     <Workflow name="error-recovery">
       <Sequence>
-        <Task id="risky" output="risky" agent={riskyAgent} retries={2} timeoutMs={30_000}>
+        <Task id="risky" output={outputs.risky} agent={riskyAgent} retries={2} timeoutMs={30_000}>
           Attempt the operation.
         </Task>
 
         <Branch
           if={ok}
           then={
-            <Task id="summary" output="output">
+            <Task id="summary" output={outputs.output}>
               {{ summary: `Success: ${risky?.message}` }}
             </Task>
           }
           else={
-            <Task id="summary" output="output">
+            <Task id="summary" output={outputs.output}>
               {{ summary: `Fallback: operation did not succeed` }}
             </Task>
           }
@@ -147,21 +152,22 @@ The `<Branch>` component evaluates its `if` prop at render time. On the first re
 Here is a workflow that combines multiple error handling patterns:
 
 ```tsx
+// assuming outputs from createSmithers
 export default smithers((ctx) => {
-  const analysis = ctx.outputMaybe("analysis", { nodeId: "analyze" });
-  const lint = ctx.outputMaybe("lint", { nodeId: "lint" });
+  const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
+  const lint = ctx.outputMaybe(outputs.lint, { nodeId: "lint" });
 
   return (
     <Workflow name="robust-pipeline">
       <Sequence>
         {/* Retries + timeout for the critical analysis step */}
-        <Task id="analyze" output="analysis" agent={analyst} retries={3} timeoutMs={120_000}>
+        <Task id="analyze" output={outputs.analysis} agent={analyst} retries={3} timeoutMs={120_000}>
           Analyze the codebase thoroughly.
         </Task>
 
         {/* Optional lint step -- continues even if it fails */}
         {analysis ? (
-          <Task id="lint" output="lint" agent={linter} retries={1} continueOnFail>
+          <Task id="lint" output={outputs.lint} agent={linter} retries={1} continueOnFail>
             {`Lint the files: ${analysis.filesAnalyzed.join(", ")}`}
           </Task>
         ) : null}
@@ -170,7 +176,7 @@ export default smithers((ctx) => {
         {analysis ? (
           <Task
             id="report"
-            output="report"
+            output={outputs.report}
             agent={reporter}
             skipIf={ctx.input.mode === "quick"}
           >
@@ -182,7 +188,7 @@ Lint results: ${lint?.issues?.join(", ") ?? "lint skipped or failed"}`}
 
         {/* Always produce a final summary */}
         {analysis ? (
-          <Task id="final" output="output">
+          <Task id="final" output={outputs.output}>
             {{ summary: analysis.summary, lintPassed: lint?.passed ?? null }}
           </Task>
         ) : null}

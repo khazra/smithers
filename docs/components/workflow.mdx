@@ -31,14 +31,14 @@ Direct children of `<Workflow>` are executed **sequentially** from top to bottom
 // These two are equivalent:
 
 <Workflow name="example">
-  <Task id="first" output="first">{/* ... */}</Task>
-  <Task id="second" output="second">{/* ... */}</Task>
+  <Task id="first" output={outputs.first}>{/* ... */}</Task>
+  <Task id="second" output={outputs.second}>{/* ... */}</Task>
 </Workflow>
 
 <Workflow name="example">
   <Sequence>
-    <Task id="first" output="first">{/* ... */}</Task>
-    <Task id="second" output="second">{/* ... */}</Task>
+    <Task id="first" output={outputs.first}>{/* ... */}</Task>
+    <Task id="second" output={outputs.second}>{/* ... */}</Task>
   </Sequence>
 </Workflow>
 ```
@@ -51,10 +51,10 @@ When `cache` is enabled, the runtime checks whether a task's output row already 
 
 ```tsx
 <Workflow name="pipeline" cache>
-  <Task id="expensive-step" output="expensiveStep" agent={myAgent}>
+  <Task id="expensive-step" output={outputs.expensiveStep} agent={myAgent}>
     Perform a costly analysis.
   </Task>
-  <Task id="cheap-step" output="cheapStep">
+  <Task id="cheap-step" output={outputs.cheapStep}>
     {{ status: "done" }}
   </Task>
 </Workflow>

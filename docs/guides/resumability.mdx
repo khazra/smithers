@@ -22,7 +22,8 @@ The resume flow:
 Resumability relies on stable, deterministic node identity. A task's identity comes from its `id` prop:
 
 ```tsx
-<Task id="analyze" output="analysis" agent={analyst}>
+{/* assuming outputs from createSmithers */}
+<Task id="analyze" output={outputs.analysis} agent={analyst}>
   Analyze the codebase.
 </Task>
 ```

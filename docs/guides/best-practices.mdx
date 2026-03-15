@@ -14,16 +14,18 @@ Agents perform better with a single, well-scoped task than with many micro-steps
 - A later task depends on the structured output of an earlier one.
 
 ```tsx
+// assuming outputs from createSmithers
+
 // Avoid: splitting one logical operation into many tiny tasks
 <Sequence>
-  <Task id="read-files" output="files" agent={codeAgent}>Read the config files</Task>
-  <Task id="find-bugs" output="bugs" agent={codeAgent}>Find bugs in the files</Task>
-  <Task id="fix-bugs" output="fixes" agent={codeAgent}>Fix the bugs you found</Task>
-  <Task id="write-fixes" output="written" agent={codeAgent}>Write the fixes to disk</Task>
+  <Task id="read-files" output={outputs.files} agent={codeAgent}>Read the config files</Task>
+  <Task id="find-bugs" output={outputs.bugs} agent={codeAgent}>Find bugs in the files</Task>
+  <Task id="fix-bugs" output={outputs.fixes} agent={codeAgent}>Fix the bugs you found</Task>
+  <Task id="write-fixes" output={outputs.written} agent={codeAgent}>Write the fixes to disk</Task>
 </Sequence>
 
 // Better: one coherent task with tools
-<Task id="fix-config-bugs" output="result" agent={codeAgentWithTools}>
+<Task id="fix-config-bugs" output={outputs.result} agent={codeAgentWithTools}>
   {`Analyze the config files in ${ctx.input.configDir}, find any bugs,
 fix them, and write the corrected files. Return a summary of changes.`}
 </Task>
@@ -42,18 +44,19 @@ The second approach gives the agent full context and lets it use tools (`read`, 
 
 ```tsx
 // Good: concrete stop condition
+// assuming outputs from createSmithers
 <Loop
-  until={ctx.outputMaybe("review", { nodeId: "review" })?.approved === true}
+  until={ctx.outputMaybe(outputs.review, { nodeId: "review" })?.approved === true}
   maxIterations={5}
   onMaxReached="return-last"
 >
   <Sequence>
-    <Task id="implement" output="implement" agent={implementer}>
+    <Task id="implement" output={outputs.implement} agent={implementer}>
       {`Implement the feature. Previous feedback: ${
-        ctx.outputMaybe("review", { nodeId: "review" })?.feedback ?? "None yet"
+        ctx.outputMaybe(outputs.review, { nodeId: "review" })?.feedback ?? "None yet"
       }`}
     </Task>
-    <Task id="review" output="review" agent={reviewer}>
+    <Task id="review" output={outputs.review} agent={reviewer}>
       {`Review the implementation. Approve if it meets requirements.
 Return JSON with approved (boolean) and feedback (string).`}
     </Task>
@@ -68,13 +71,15 @@ Always set `maxIterations` to prevent infinite loops. Use `onMaxReached: "return
 Do not assume the agent will run checks without being asked. If you need tests, linting, or verification, put it explicitly in the prompt:
 
 ```tsx
+// assuming outputs from createSmithers
+
 // Vague -- agent might not verify
-<Task id="implement" output="result" agent={codeAgent}>
+<Task id="implement" output={outputs.result} agent={codeAgent}>
   Fix the authentication bug.
 </Task>
 
 // Better -- explicit verification instructions
-<Task id="implement" output="result" agent={codeAgentWithTools}>
+<Task id="implement" output={outputs.result} agent={codeAgentWithTools}>
   {`Fix the authentication bug in ${ctx.input.file}.
 
 After making changes:
@@ -95,7 +100,7 @@ Return JSON with:
 Design your output schemas to capture the data you need for downstream tasks and human inspection. The agent should return fields you can act on programmatically:
 
 ```tsx
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   analysis: z.object({
     summary: z.string(),
     issuesFound: z.number(),
@@ -134,8 +139,9 @@ const reviewSchema = z.object({
   score: z.number().int().min(1).max(10),
 });
 
-<Task id="review" output="review" outputSchema={reviewSchema} agent={reviewer}>
-  <ReviewPrompt code={ctx.output("implement", { nodeId: "implement" }).code} />
+// assuming outputs from createSmithers
+<Task id="review" output={outputs.review} outputSchema={reviewSchema} agent={reviewer}>
+  <ReviewPrompt code={ctx.output(outputs.implement, { nodeId: "implement" }).code} />
 </Task>
 ```
 
@@ -149,23 +155,24 @@ Structure your workflow so that resuming after a crash produces correct results:
 
 ```tsx
 // Good: deterministic, conditional, resumable
+// assuming outputs from createSmithers
 export default smithers((ctx) => {
-  const analysis = ctx.outputMaybe("analysis", { nodeId: "analyze" });
-  const fix = ctx.outputMaybe("fix", { nodeId: "fix" });
+  const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
+  const fix = ctx.outputMaybe(outputs.fix, { nodeId: "fix" });
 
   return (
     <Workflow name="robust">
       <Sequence>
-        <Task id="analyze" output="analysis" agent={analyst}>
+        <Task id="analyze" output={outputs.analysis} agent={analyst}>
           Analyze the codebase.
         </Task>
         {analysis ? (
-          <Task id="fix" output="fix" agent={fixer}>
+          <Task id="fix" output={outputs.fix} agent={fixer}>
             {`Fix: ${analysis.summary}`}
           </Task>
         ) : null}
         {fix ? (
-          <Task id="report" output="report">
+          <Task id="report" output={outputs.report}>
             {{ summary: fix.explanation, filesChanged: fix.files }}
           </Task>
         ) : null}
@@ -191,9 +198,10 @@ This makes it easy to iterate on prompts without touching workflow logic, and to
 Every agent task should have a timeout. Agent calls can hang due to rate limits, network issues, or unexpectedly long generation times:
 
 ```tsx
+{/* assuming outputs from createSmithers */}
 <Task
   id="analyze"
-  output="analysis"
+  output={outputs.analysis}
   agent={analyst}
   timeoutMs={120_000}   // 2 minutes
   retries={2}            // 3 total attempts
@@ -232,7 +240,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { read, grep, bash, edit, write } from "smithers-orchestrator";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   implement: z.object({
     summary: z.string(),
     filesChanged: z.array(z.string()),
@@ -265,8 +273,8 @@ const reviewer = new Agent({
 });
 
 export default smithers((ctx) => {
-  const review = ctx.outputMaybe("review", { nodeId: "review" });
-  const implement = ctx.outputMaybe("implement", { nodeId: "implement" });
+  const review = ctx.outputMaybe(outputs.review, { nodeId: "review" });
+  const implement = ctx.outputMaybe(outputs.implement, { nodeId: "implement" });
 
   return (
     <Workflow name="review-loop">
@@ -279,7 +287,7 @@ export default smithers((ctx) => {
           <Sequence>
             <Task
               id="implement"
-              output="implement"
+              output={outputs.implement}
               agent={implementer}
               timeoutMs={300_000}
               retries={1}
@@ -297,7 +305,7 @@ Return JSON with summary, filesChanged, testsRun, testsPassed.`}
 
             <Task
               id="review"
-              output="review"
+              output={outputs.review}
               agent={reviewer}
               timeoutMs={120_000}
               retries={1}
@@ -314,7 +322,7 @@ Return JSON with approved (boolean), feedback (string), score (1-10).`}
         </Loop>
 
         {review ? (
-          <Task id="report" output="report">
+          <Task id="report" output={outputs.report}>
             {{
               title: `Review: ${ctx.input.description}`,
               body: review.feedback,

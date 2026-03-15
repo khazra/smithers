@@ -11,13 +11,13 @@ description: Execute a Smithers workflow programmatically and get back a durable
 import { createSmithers, Task, runWorkflow } from "smithers-orchestrator";
 import { z } from "zod";
 
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   analysis: z.object({ summary: z.string() }),
 });
 
 const workflow = smithers((ctx) => (
   <Workflow name="example">
-    <Task id="analyze" output="analysis" agent={myAgent}>
+    <Task id="analyze" output={outputs.analysis} agent={myAgent}>
       {`Analyze: ${ctx.input.description}`}
     </Task>
   </Workflow>
@@ -80,14 +80,14 @@ The `output` field on `RunResult` is **only** populated if your schema passed to
 
 ```ts
 // ✅ result.output WILL be populated
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   output: z.object({ summary: z.string() }),
 });
 ```
 
 ```ts
 // ❌ result.output will be undefined
-const { Workflow, smithers } = createSmithers({
+const { Workflow, smithers, outputs } = createSmithers({
   page: z.object({ title: z.string(), html: z.string() }),
 });
 ```
