@@ -86,8 +86,6 @@ steps[2]:
       maxWords: 100
       format: "bullet"
 
-  # Generates steps: first-pass-summarize
-
   - id: second-pass
     kind: component
     use: Summarizer
@@ -95,8 +93,6 @@ steps[2]:
       text: "{first-pass-summarize.summary}"
       maxWords: 50
       format: "prose"
-
-  # Generates steps: second-pass-summarize
 ```
 
 The `{id}` token in the component definition is replaced with the caller's `id` value at compile time.

@@ -3,7 +3,7 @@ title: TOON Overview
 description: Declarative .toon files for defining Smithers workflows without TypeScript boilerplate.
 ---
 
-TOON is the primary way to define Smithers workflows. A `.toon` file is a declarative document — similar to MDX but for workflow orchestration — that compiles to the same durable execution engine as the Effect builder API.
+TOON is the primary way to define Smithers workflows. A `.toon` file uses the [TOON format](https://github.com/toon-format/toon) (Token-Oriented Object Notation) — a compact, line-oriented data format that combines YAML-style indentation for objects with CSV-style tabular layout for uniform arrays. TOON is **not** YAML: it requires explicit array lengths (`[N]`), supports tabular `{field}` headers, and has no comment syntax. Smithers compiles `.toon` files to the same durable execution engine as the Effect builder API.
 
 ## What Is a TOON File?
 

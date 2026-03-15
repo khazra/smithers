@@ -154,10 +154,12 @@ components:
 **Reference specific fields.** Instead of passing an entire object, reference the specific fields the model needs:
 
 ```toon
-# Prefer this
 prompt: "Summary: {analysis.summary}\nSeverity: {analysis.severity}"
+```
 
-# Over this
+Over passing entire objects:
+
+```toon
 prompt: "Analysis: {analysis}"
 ```
 
