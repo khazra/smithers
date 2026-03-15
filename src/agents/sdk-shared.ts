@@ -1,9 +1,9 @@
-import type { Output, ToolLoopAgentSettings, ToolSet } from "ai";
+import type { ToolLoopAgentSettings, ToolSet } from "ai";
 
 export type SdkAgentOptions<
   CALL_OPTIONS = never,
   TOOLS extends ToolSet = {},
-  OUTPUT extends Output = never,
+  OUTPUT = any,
   MODEL = any,
 > = Omit<ToolLoopAgentSettings<CALL_OPTIONS, TOOLS, OUTPUT>, "model"> & {
   /**
