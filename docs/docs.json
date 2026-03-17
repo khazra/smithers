@@ -82,6 +82,7 @@
             "integrations/linear",
             "integrations/cli-agents",
             "integrations/sdk-agents",
+            "integrations/baml",
             "integrations/server",
             "integrations/pi-plugin",
             "integrations/pi-integration"
@@ -163,6 +164,7 @@
               "guides/review-loop",
               "guides/dynamic-tickets",
               "guides/mdx-prompts",
+              "integrations/baml",
               "guides/structured-output",
               "guides/error-handling",
               "guides/patterns",
@@ -218,14 +220,14 @@
               }
             ]
           },
-          {
-            "group": "Reference",
-            "pages": [
+        {
+          "group": "Reference",
+          "pages": [
               "reference/types"
-            ]
-          }
-        ]
-      }
-    ]
+          ]
+        }
+      ]
+    }
+  ]
   }
 }

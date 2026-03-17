@@ -128,6 +128,12 @@ The callback can be synchronous or asynchronous. All task props (`timeoutMs`, `r
 
 If the callback throws, the task fails and follows the normal retry/continueOnFail behavior. If `timeoutMs` is set, the callback is raced against a timeout.
 
+### BAML-generated tasks
+
+BAML-generated task components use compute mode internally. A `.baml` import compiles to a component that calls the generated `baml_client` inside a Smithers compute task, so BAML owns prompting and parsing while Smithers still applies dependencies, approvals, retries, caching, and persistence.
+
+See [BAML](/integrations/baml).
+
 ## Static mode
 
 When no `agent` prop is provided and children is not a function, children are treated as the output payload and written directly to the database. This is useful for seeding data, passing constants between tasks, or producing computed output without calling an AI model.

@@ -583,14 +583,19 @@ Props for the `<Task>` component.
 type TaskProps<Row> = {
   key?: string;
   id: string;
-  output: Table | string;
+  output: ZodObject<any> | Table | string;
   outputSchema?: import("zod").ZodObject<any>;
-  agent?: AgentLike;
+  agent?: AgentLike | AgentLike[];
+  fallbackAgent?: AgentLike;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
   skipIf?: boolean;
   needsApproval?: boolean;
   timeoutMs?: number;
   retries?: number;
+  retryPolicy?: RetryPolicy;
   continueOnFail?: boolean;
+  cache?: CachePolicy;
   label?: string;
   meta?: Record<string, unknown>;
   children: string | Row | (() => Row | Promise<Row>) | React.ReactNode;
@@ -600,14 +605,19 @@ type TaskProps<Row> = {
 | Prop | Type | Required | Description |
 |---|---|---|---|
 | `id` | `string` | Yes | Unique task identifier within the workflow |
-| `output` | `Table \| string` | Yes | Drizzle table or table name for persisting results |
+| `output` | `ZodObject<any> \| Table \| string` | Yes | Zod schema from `createSmithers()` (recommended), a Drizzle table, or a string key |
 | `outputSchema` | `ZodObject<any>` | No | Zod schema for validating agent output |
-| `agent` | `AgentLike` | No | AI agent to execute the task |
+| `agent` | `AgentLike \| AgentLike[]` | No | AI agent or fallback chain to execute the task |
+| `fallbackAgent` | `AgentLike` | No | Convenience alias for appending one fallback agent |
+| `dependsOn` | `string[]` | No | Explicit dependency on other task node IDs |
+| `needs` | `Record<string, string>` | No | Named dependencies exposed through context keys |
 | `skipIf` | `boolean` | No | Skip this task when true |
 | `needsApproval` | `boolean` | No | Pause for human approval before execution |
 | `timeoutMs` | `number` | No | Task-level timeout in milliseconds |
 | `retries` | `number` | No | Number of retry attempts on failure (default: 0) |
+| `retryPolicy` | `RetryPolicy` | No | Retry timing configuration |
 | `continueOnFail` | `boolean` | No | Continue the workflow even if this task fails |
+| `cache` | `CachePolicy` | No | Cache configuration for reuse across runs |
 | `label` | `string` | No | Human-readable label |
 | `meta` | `Record<string, unknown>` | No | Arbitrary metadata |
 | `children` | `string \| Row \| (() => Row \| Promise<Row>) \| ReactNode` | Yes | Prompt text, compute callback, static payload, or nested elements |

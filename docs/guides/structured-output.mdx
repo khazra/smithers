@@ -73,6 +73,19 @@ Return JSON matching this schema:
 
 For string children, you should describe the expected shape explicitly in the prompt text. The `outputSchema` prop still participates in validation and cache key computation.
 
+## BAML-generated tasks
+
+When a task comes from a `.baml` import, BAML owns prompt rendering, schema-aware parsing, and output repair. Smithers does **not** run the agent-mode JSON extraction flow for these tasks.
+
+Instead, the generated BAML wrapper runs as a Smithers compute task:
+
+1. the wrapper calls `baml_client`
+2. BAML returns a parsed, typed value
+3. Smithers validates that value against the generated Zod schema
+4. Smithers persists the validated output normally
+
+The JSON extraction and follow-up schema retry prompts described below apply to Smithers **agent mode**, not to generated BAML tasks.
+
 ## Validation Flow
 
 When a task executes, Smithers validates the agent's output through the following steps:

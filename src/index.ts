@@ -150,6 +150,10 @@ export type { RevertOptions, RevertResult } from "./revert";
 
 // Utilities
 export { mdxPlugin } from "./mdx-plugin";
+export {
+  bamlPlugin,
+  createBamlPlugin,
+} from "./baml-plugin";
 export { markdownComponents } from "./markdownComponents";
 export { renderMdx } from "./renderMdx";
 export { zodToTable } from "./zodToTable";

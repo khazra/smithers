@@ -1,6 +1,6 @@
 {
   "name": "smithers-orchestrator",
-  "version": "0.10.0",
+  "version": "0.12.0",
   "description": "AI workflow orchestration with JSX",
   "author": "William Cory",
   "license": "MIT",
@@ -19,6 +19,7 @@
     "./pi-plugin": "./src/pi-plugin/index.ts",
     "./pi-extension": "./src/pi-plugin/extension.ts",
     "./mdx-plugin": "./src/mdx-plugin.ts",
+    "./baml-plugin": "./src/baml-plugin.ts",
     "./dom/renderer": "./src/dom/renderer.ts",
     "./linear": "./src/linear/index.ts"
   },
@@ -53,6 +54,7 @@
     "typecheck": "tsc --noEmit",
     "cli": "bun run src/cli/index.ts",
     "test": "bun test tests/*.test.ts tests/*.test.tsx",
+    "test:baml-live": "SMITHERS_BAML_LIVE_E2E=1 bun test tests/baml-live.e2e.test.ts",
     "e2e": "playwright test",
     "docs": "cd docs && bunx mintlify dev"
   },
@@ -91,6 +93,7 @@
     "typescript": "^5"
   },
   "devDependencies": {
+    "@boundaryml/baml": "0.220.0",
     "@playwright/test": "^1.52.0",
     "@types/bun": "latest",
     "@types/diff": "^5.2.0",
