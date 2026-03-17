@@ -3,7 +3,7 @@ title: TOON Overview
 description: Declarative .toon files for defining Smithers workflows without TypeScript boilerplate.
 ---
 
-TOON is the primary way to define Smithers workflows. A `.toon` file uses the [TOON format](https://github.com/toon-format/toon) (Token-Oriented Object Notation) — a compact, line-oriented data format that combines YAML-style indentation for objects with CSV-style tabular layout for uniform arrays. TOON is **not** YAML: it requires explicit array lengths (`[N]`), supports tabular `{field}` headers, and has no comment syntax. Smithers compiles `.toon` files to the same durable execution engine as the Effect builder API.
+TOON is the primary way to define Smithers workflows. A `.toon` file uses the [TOON format](https://github.com/toon-format/toon) (Token-Oriented Object Notation) — a compact, line-oriented data format that combines YAML-style indentation for objects with CSV-style tabular layout for uniform arrays. TOON is **not** YAML: it requires explicit array lengths (`[N]`), supports tabular `{field}` headers, and has no comment syntax. Smithers compiles `.toon` files to the same durable execution engine as the JSX API.
 
 ## What Is a TOON File?
 
@@ -33,15 +33,14 @@ The `agents:` block declares named agents — each with a `type:` (the runtime),
 
 ## Three-Layer Architecture
 
-Smithers offers three ways to define workflows, each building on the one below:
+Smithers offers two ways to define workflows:
 
 | Layer | Format | When to Use |
 | --- | --- | --- |
 | **TOON** | `.toon` files | Most workflows. Declarative, prompt-first, zero boilerplate. |
-| **Effect Builder** | TypeScript | Advanced control flow, custom services, complex dependency injection. |
 | **JSX** | TSX | Component-based API using React-style JSX syntax. |
 
-TOON files compile to the Effect builder internally. You can mix TOON and Effect in the same project — a TOON workflow can import Effect services, and an Effect workflow can reference TOON components.
+TOON files compile to the same internal graph as JSX. You can mix TOON and JSX in the same project.
 
 ## Why TOON?
 
@@ -52,7 +51,7 @@ Most AI workflows are prompt-centric: define inputs, call a model with a prompt,
 - **Control flow is visual** — sequences, parallels, loops, and approvals are node kinds, not nested function calls
 - **Components are reusable** — extract repeated patterns into parameterized components
 
-When you need something TOON can't express — custom Effect services, complex branching logic, programmatic graph construction — drop down to the Effect builder API.
+When you need something TOON can't express — complex branching logic, programmatic graph construction — use the JSX API.
 
 ## Minimal Example
 
@@ -92,11 +91,11 @@ steps[2]:
       wordCount: number
 ```
 
-Steps execute sequentially by default. The `report` step references `{research.summary}` — Smithers resolves this as a typed dependency edge, just like `needs` in the Effect builder.
+Steps execute sequentially by default. The `report` step references `{research.summary}` — Smithers resolves this as a typed dependency edge, just like `dependsOn` in JSX.
 
 ## Control Flow
 
-Steps execute sequentially by default. TOON supports the same control flow primitives as the JSX and Effect APIs.
+Steps execute sequentially by default. TOON supports the same control flow primitives as the JSX API.
 
 ### Parallel
 
@@ -125,7 +124,7 @@ steps[2]:
       summary: string
 ```
 
-This is the TOON equivalent of `<Parallel>` in JSX or `$.parallel()` in the Effect builder.
+This is the TOON equivalent of `<Parallel>` in JSX.
 
 ### Loops
 
@@ -222,7 +221,7 @@ Every `prompt:` step needs an agent to handle it. Agents are declared in the top
 
 ### Agent types
 
-The `type:` field selects the agent runtime. Smithers supports all the same agent backends as the JSX and Effect APIs:
+The `type:` field selects the agent runtime. Smithers supports all the same agent backends as the JSX API:
 
 | Type | Runtime | JSX Equivalent |
 | --- | --- | --- |
@@ -299,17 +298,17 @@ Steps that use `run:` or `handler:` instead of `prompt:` do not need an agent �
 
 ## How It Compiles
 
-A `.toon` file compiles to the same internal graph as a `Smithers.workflow(...).build(...)` call:
+A `.toon` file compiles to the same internal graph that JSX workflows produce:
 
 ```txt
 .toon file
   -> TOON parser
-  -> Workflow graph (same as Effect builder output)
+  -> Workflow graph (same as JSX output)
   -> Normalized plan
   -> Durable execution
 ```
 
-At runtime, there is no difference between a TOON workflow and an Effect builder workflow. They share the same engine, the same SQLite persistence, the same retry/approval/caching semantics, and the same observability.
+At runtime, there is no difference between a TOON workflow and a JSX workflow. They share the same engine, the same SQLite persistence, the same retry/approval/caching semantics, and the same observability.
 
 ## Running a TOON Workflow
 
@@ -339,4 +338,4 @@ const result = await Effect.runPromise(
 - [Schemas](/toon/schemas) — Define input and output types inline.
 - [Nodes](/toon/nodes) — All node kinds: step, sequence, parallel, loop, approval, branch, worktree.
 - [Prompts](/toon/prompts) — Write prompts with interpolation and multi-line syntax.
-- [Effect Builder API](/effect/overview) — When you need more power.
+- [JSX Overview](/jsx/overview) — When you need more power.

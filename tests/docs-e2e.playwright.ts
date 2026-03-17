@@ -50,10 +50,10 @@ test("home redirects to introduction and tabs switch between authoring APIs", as
 }) => {
   const introduction = docsPageBySlug.get("introduction");
   const jsxTab = tabLinks.find((tab) => tab.label === "JSX");
-  const effectTab = tabLinks.find((tab) => tab.label === "Effect Builder");
+  const toonTab = tabLinks.find((tab) => tab.label === "TOON");
 
-  if (!introduction || !jsxTab || !effectTab) {
-    throw new Error("Expected introduction, JSX tab, and Effect Builder tab");
+  if (!introduction || !jsxTab || !toonTab) {
+    throw new Error("Expected introduction, JSX tab, and TOON tab");
   }
 
   await page.goto("/");
@@ -73,14 +73,14 @@ test("home redirects to introduction and tabs switch between authoring APIs", as
 
   await page
     .getByRole("navigation", { name: "API tabs" })
-    .getByRole("link", { name: effectTab.label })
+    .getByRole("link", { name: toonTab.label })
     .click();
   await expect(page).toHaveURL(
-    new RegExp(`/${escapeRegExp(effectTab.slug)}$`),
+    new RegExp(`/${escapeRegExp(toonTab.slug)}$`),
   );
   await expect(
     page.getByRole("heading", {
-      name: docsPageBySlug.get(effectTab.slug)!.title,
+      name: docsPageBySlug.get(toonTab.slug)!.title,
     }),
   ).toBeVisible();
 });

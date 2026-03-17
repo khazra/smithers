@@ -57,41 +57,4 @@ console.log(result.message);
 3. The response is validated against the output schema (`message: string`)
 4. The output is persisted to SQLite and returned
 
-## Effect Builder Equivalent
 
-```ts
-import { Context, Effect, Layer, Schema } from "effect";
-import { Model } from "@effect/sql";
-import { Smithers } from "smithers-orchestrator";
-
-class Input extends Schema.Class<Input>("Input")({
-  name: Schema.String,
-}) {}
-
-class Greeting extends Model.Class<Greeting>("Greeting")({
-  message: Schema.String,
-}) {}
-
-class Greeter extends Context.Tag("Greeter")<
-  Greeter,
-  { readonly greet: (name: string) => Effect.Effect<Greeting> }
->() {}
-
-const Hello = Smithers.workflow({
-  name: "hello-world",
-  input: Input,
-}).build(($) => {
-  const greet = $.step("greet", {
-    output: Greeting,
-    run: ({ input }) =>
-      Effect.gen(function* () {
-        const greeter = yield* Greeter;
-        return yield* greeter.greet(input.name);
-      }),
-  });
-
-  return $.sequence(greet);
-});
-```
-
-The TOON version is 12 lines. The Effect builder version is 30+.

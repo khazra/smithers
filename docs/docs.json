@@ -12,7 +12,8 @@
     { "source": "/docs/quickstart", "destination": "/quickstart" },
     { "source": "/toon", "destination": "/toon/overview" },
     { "source": "/jsx", "destination": "/jsx/overview" },
-    { "source": "/effect", "destination": "/effect/overview" },
+    { "source": "/effect", "destination": "/toon/overview" },
+    { "source": "/effect/:slug*", "destination": "/toon/overview" },
     { "source": "/docs/concepts/:slug*", "destination": "/concepts/:slug*" },
     { "source": "/docs/components/:slug*", "destination": "/components/:slug*" },
     { "source": "/docs/guides/:slug*", "destination": "/guides/:slug*" },
@@ -30,7 +31,7 @@
     { "source": "/docs/parallel", "destination": "/components/parallel" },
     { "source": "/docs/branch", "destination": "/components/branch" },
     { "source": "/docs/structured-output", "destination": "/guides/structured-output" },
-    { "source": "/concepts/context", "destination": "/effect/context" },
+    { "source": "/concepts/context", "destination": "/toon/overview" },
     { "source": "/concepts/renderer-internals", "destination": "/concepts/planner-internals" }
   ],
   "navigation": {
@@ -221,27 +222,6 @@
             "group": "Reference",
             "pages": [
               "reference/types"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Effect Builder",
-        "groups": [
-          {
-            "group": "Getting Started",
-            "pages": [
-              "effect/overview",
-              "effect/installation",
-              "effect/quickstart"
-            ]
-          },
-          {
-            "group": "Builder API",
-            "pages": [
-              "effect/builder-api",
-              "effect/context",
-              "effect/services"
             ]
           }
         ]
