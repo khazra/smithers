@@ -44,6 +44,7 @@ import {
   Workflow,
 } from "../components";
 import { camelToSnake } from "../utils/camelToSnake";
+import { SmithersError } from "../utils/errors";
 
 type AnySchema = any;
 type AnyEffect = any;
@@ -453,7 +454,7 @@ function readHandle(
 ): unknown {
   const value = readHandleMaybe(handle, ctx);
   if (value === undefined) {
-    throw new Error(`Missing output for step "${handle.id}"`);
+    throw new SmithersError("TOON_STEP_MISSING_OUTPUT", `Missing output for step "${handle.id}"`);
   }
   return value;
 }
@@ -765,11 +766,11 @@ function registerPluginHandles(env: ToonEnv, node: BuilderNode) {
   for (const handle of handles) {
     const existing = env.handles.get(handle.id);
     if (existing && existing !== handle) {
-      throw new Error(`Duplicate step id "${handle.id}"`);
+      throw new SmithersError("TOON_DUPLICATE_STEP", `Duplicate step id "${handle.id}"`);
     }
     if (!existing) {
       if (env.seenIds.has(handle.id)) {
-        throw new Error(`Duplicate step id "${handle.id}"`);
+        throw new SmithersError("TOON_DUPLICATE_STEP", `Duplicate step id "${handle.id}"`);
       }
       env.seenIds.add(handle.id);
       env.handles.set(handle.id, handle);
@@ -788,7 +789,7 @@ function annotateLoops(node: BuilderNode, activeLoopId?: string): BuilderStepHan
       return node.children.flatMap((child) => annotateLoops(child, activeLoopId));
     case "loop": {
       if (activeLoopId) {
-        throw new Error("Nested builder loops are not supported.");
+        throw new SmithersError("TOON_NESTED_LOOP", "Nested builder loops are not supported.");
       }
       const handles = annotateLoops(node.children, node.id ?? "__loop__");
       node.handles = handles;
@@ -1007,7 +1008,7 @@ type ToonPlugin = {
   name?: string;
   nodes?: Record<string, ToonPluginNodeHandler>;
   services?: Record<string, unknown>;
-  layers?: Layer<never, never, never> | Layer<never, never, never>[];
+  layers?: Layer.Layer<never, never, never> | Layer.Layer<never, never, never>[];
 };
 
 type ToonEnv = {
@@ -1298,13 +1299,13 @@ function parseSchemaType(
       const schema = Schema.Boolean;
       return optional ? Schema.optional(schema) : schema;
     }
-    throw new Error(`Unknown schema type "${raw}" for ${label}`);
+    throw new SmithersError("TOON_SCHEMA_INVALID", `Unknown schema type "${raw}" for ${label}`);
   }
   if (Array.isArray(def)) {
     if (def.length === 1 && isRecord(def[0])) {
       return Schema.Array(parseSchemaType(def[0], registry, label));
     }
-    throw new Error(`Unsupported schema array definition for ${label}`);
+    throw new SmithersError("TOON_SCHEMA_INVALID", `Unsupported schema array definition for ${label}`);
   }
   if (isRecord(def)) {
     const fields: Record<string, AnySchema> = {};
@@ -1316,7 +1317,7 @@ function parseSchemaType(
     }
     return Schema.Struct(fields);
   }
-  throw new Error(`Invalid schema definition for ${label}`);
+  throw new SmithersError("TOON_SCHEMA_INVALID", `Invalid schema definition for ${label}`);
 }
 
 function parseSchemaEntry(
@@ -1412,7 +1413,7 @@ function buildNeedsMap(env: ToonEnv, deps: Set<string>): Record<string, BuilderS
   for (const id of deps) {
     const handle = env.handles.get(id);
     if (!handle) {
-      throw new Error(`Unknown dependency "${id}"`);
+      throw new SmithersError("TOON_UNKNOWN_DEPENDENCY", `Unknown dependency "${id}"`);
     }
     needs[id] = handle;
   }
@@ -1536,12 +1537,12 @@ async function buildAgentFromConfig(name: string, config: Record<string, any>): 
   delete opts.type;
   if (!opts.id) opts.id = name;
   if (!type || typeof type !== "string") {
-    throw new Error(`Agent "${name}" is missing a valid type`);
+    throw new SmithersError("TOON_AGENT_CONFIG_INVALID", `Agent "${name}" is missing a valid type`);
   }
   switch (type) {
     case "anthropic":
       if (!opts.model) {
-        throw new Error(`Agent "${name}" (type: anthropic) requires "model"`);
+        throw new SmithersError("TOON_AGENT_CONFIG_INVALID", `Agent "${name}" (type: anthropic) requires "model"`);
       }
       return new AnthropicAgent(opts as any);
     case "claude-code":
@@ -1552,7 +1553,7 @@ async function buildAgentFromConfig(name: string, config: Record<string, any>): 
       return new GeminiAgent(opts);
     case "openai":
       if (!opts.model) {
-        throw new Error(`Agent "${name}" (type: openai) requires "model"`);
+        throw new SmithersError("TOON_AGENT_CONFIG_INVALID", `Agent "${name}" (type: openai) requires "model"`);
       }
       return new OpenAIAgent(opts as any);
     case "pi":
@@ -1565,7 +1566,7 @@ async function buildAgentFromConfig(name: string, config: Record<string, any>): 
       const providerName = opts.provider;
       const modelName = opts.model;
       if (!providerName || !modelName) {
-        throw new Error(`Agent "${name}" (type: api) requires "provider" and "model"`);
+        throw new SmithersError("TOON_AGENT_CONFIG_INVALID", `Agent "${name}" (type: api) requires "provider" and "model"`);
       }
       const rest = { ...opts };
       delete (rest as any).provider;
@@ -1582,10 +1583,10 @@ async function buildAgentFromConfig(name: string, config: Record<string, any>): 
           ...rest,
         });
       }
-      throw new Error(`Unsupported api provider "${providerName}" for agent "${name}"`);
+      throw new SmithersError("TOON_AGENT_CONFIG_INVALID", `Unsupported api provider "${providerName}" for agent "${name}"`);
     }
     default:
-      throw new Error(`Unknown agent type "${type}" for "${name}"`);
+      throw new SmithersError("TOON_AGENT_CONFIG_INVALID", `Unknown agent type "${type}" for "${name}"`);
   }
 }
 
@@ -1608,7 +1609,7 @@ async function resolveImportedSchemas(
     const mod = await importModule(from, baseDir);
     for (const name of use) {
       const value = mod[name];
-      if (!value) throw new Error(`Schema "${name}" not found in ${from}`);
+      if (!value) throw new SmithersError("TOON_NOT_FOUND", `Schema "${name}" not found in ${from}`);
       out.set(name, { schema: value, jsonSchema: buildJsonSchema(value) });
     }
   }
@@ -1629,7 +1630,7 @@ async function resolveImportedAgents(
     for (const name of use) {
       const value = mod[name];
       if (!value || typeof value.generate !== "function") {
-        throw new Error(`Agent "${name}" not found in ${from}`);
+        throw new SmithersError("TOON_NOT_FOUND", `Agent "${name}" not found in ${from}`);
       }
       out.set(name, value as AgentLike);
     }
@@ -1651,7 +1652,7 @@ async function resolveImportedServices(
     for (const name of use) {
       const value = mod[name];
       if (value === undefined) {
-        throw new Error(`Service "${name}" not found in ${from}`);
+        throw new SmithersError("TOON_NOT_FOUND", `Service "${name}" not found in ${from}`);
       }
       out.set(name, value);
     }
@@ -1675,7 +1676,7 @@ async function resolveImportedWorkflows(
         ? resolved
         : resolve(baseDir, resolved);
     if (out.has(alias)) {
-      throw new Error(`Duplicate workflow alias "${alias}" in ${from}`);
+      throw new SmithersError("TOON_DUPLICATE_ALIAS", `Duplicate workflow alias "${alias}" in ${from}`);
     }
     out.set(alias, absPath);
   }
@@ -1689,12 +1690,12 @@ async function resolveImportedPlugins(
   plugins: ToonPlugin[];
   pluginNodes: Map<string, ToonPluginNodeHandler>;
   services: Map<string, unknown>;
-  layers: Layer<never, never, never>[];
+  layers: Layer.Layer<never, never, never>[];
 }> {
   const plugins: ToonPlugin[] = [];
   const pluginNodes = new Map<string, ToonPluginNodeHandler>();
   const services = new Map<string, unknown>();
-  const layers: Layer<never, never, never>[] = [];
+  const layers: Layer.Layer<never, never, never>[] = [];
   const list = Array.isArray(imports) ? imports : [];
   for (const entry of list) {
     const from = String(entry?.from ?? "");
@@ -1706,7 +1707,7 @@ async function resolveImportedPlugins(
       typeof exported === "function" ? exported : () => exported;
     const plugin = await pluginFactory(entry?.config ?? {});
     if (!plugin || typeof plugin !== "object") {
-      throw new Error(`Plugin "${from}" did not export a plugin object`);
+      throw new SmithersError("TOON_PLUGIN_INVALID", `Plugin "${from}" did not export a plugin object`);
     }
     plugins.push(plugin as ToonPlugin);
     const nodes = (plugin as ToonPlugin).nodes;
@@ -1724,9 +1725,9 @@ async function resolveImportedPlugins(
     }
     const pluginLayers = (plugin as ToonPlugin).layers;
     if (Array.isArray(pluginLayers)) {
-      layers.push(...(pluginLayers as Layer<never, never, never>[]));
+      layers.push(...(pluginLayers as Layer.Layer<never, never, never>[]));
     } else if (pluginLayers) {
-      layers.push(pluginLayers as Layer<never, never, never>);
+      layers.push(pluginLayers as Layer.Layer<never, never, never>);
     }
   }
   return { plugins, pluginNodes, services, layers };
@@ -1739,7 +1740,7 @@ const toonModuleCache = new Map<
     components: Map<string, ToonComponentDef>;
     services: Map<string, unknown>;
     pluginNodes: Map<string, ToonPluginNodeHandler>;
-    layers: Layer<never, never, never>[];
+    layers: Layer.Layer<never, never, never>[];
   }>
 >();
 
@@ -1748,16 +1749,17 @@ async function loadToonModule(absPath: string): Promise<{
   components: Map<string, ToonComponentDef>;
   services: Map<string, unknown>;
   pluginNodes: Map<string, ToonPluginNodeHandler>;
-  layers: Layer<never, never, never>[];
+  layers: Layer.Layer<never, never, never>[];
 }> {
   const cached = toonModuleCache.get(absPath);
   if (cached) return cached;
   const promise = (async () => {
     const rawText = readFileSync(absPath, "utf8");
-    const data = parseToon(rawText);
-    if (!isRecord(data)) {
-      throw new Error(`Invalid TOON file: ${absPath}`);
+    const rawData = parseToon(rawText);
+    if (!isRecord(rawData)) {
+      throw new SmithersError("TOON_INVALID_FILE", `Invalid TOON file: ${absPath}`);
     }
+    const data = rawData as Record<string, any>;
     const baseDir = dirname(absPath);
     const imports = isRecord(data.imports) ? data.imports : {};
     const importSchemas = await resolveImportedSchemas(imports.schemas, baseDir);
@@ -1772,7 +1774,7 @@ async function loadToonModule(absPath: string): Promise<{
     if (isRecord(data.schemas)) {
       for (const [name, def] of Object.entries(data.schemas)) {
         if (schemas.has(name)) {
-          throw new Error(`Duplicate schema "${name}" in ${absPath}`);
+          throw new SmithersError("TOON_DUPLICATE_SCHEMA", `Duplicate schema "${name}" in ${absPath}`);
         }
         schemas.set(name, parseSchemaEntry(def, schemas, name));
       }
@@ -1782,10 +1784,10 @@ async function loadToonModule(absPath: string): Promise<{
     if (isRecord(data.components)) {
       for (const [name, def] of Object.entries(data.components)) {
         if (components.has(name)) {
-          throw new Error(`Duplicate component "${name}" in ${absPath}`);
+          throw new SmithersError("TOON_DUPLICATE_COMPONENT", `Duplicate component "${name}" in ${absPath}`);
         }
         if (!isRecord(def) || !Array.isArray((def as any).steps)) {
-          throw new Error(`Component "${name}" is missing steps`);
+          throw new SmithersError("TOON_COMPONENT_MISSING_STEPS", `Component "${name}" is missing steps`);
         }
         components.set(name, {
           name,
@@ -1824,13 +1826,13 @@ async function resolveImportedComponents(
   schemas: Map<string, ToonSchemaEntry>;
   services: Map<string, unknown>;
   pluginNodes: Map<string, ToonPluginNodeHandler>;
-  layers: Layer<never, never, never>[];
+  layers: Layer.Layer<never, never, never>[];
 }> {
   const components = new Map<string, ToonComponentDef>();
   const schemas = new Map<string, ToonSchemaEntry>();
   const services = new Map<string, unknown>();
   const pluginNodes = new Map<string, ToonPluginNodeHandler>();
-  const layers: Layer<never, never, never>[] = [];
+  const layers: Layer.Layer<never, never, never>[] = [];
   const list = Array.isArray(imports) ? imports : [];
   for (const entry of list) {
     const from = String(entry?.from ?? "");
@@ -1847,7 +1849,7 @@ async function resolveImportedComponents(
     }
     for (const name of use) {
       const def = module.components.get(name);
-      if (!def) throw new Error(`Component "${name}" not found in ${from}`);
+      if (!def) throw new SmithersError("TOON_NOT_FOUND", `Component "${name}" not found in ${from}`);
       components.set(name, def);
     }
     for (const [name, value] of module.services) {
@@ -1871,7 +1873,7 @@ function compileNodes(nodes: any[], env: ToonEnv): BuilderNode {
 
 function compileNode(node: any, env: ToonEnv): BuilderNode {
   if (!isRecord(node)) {
-    throw new Error("Invalid TOON node");
+    throw new SmithersError("TOON_UNKNOWN_NODE", "Invalid TOON node");
   }
   const kind = node.kind;
   if (kind === "sequence") {
@@ -1947,13 +1949,13 @@ function compileNode(node: any, env: ToonEnv): BuilderNode {
   }
   if (kind === "workflow") {
     const id = String(applyComponentId(node.id, env.componentId) ?? "");
-    if (!id) throw new Error("Workflow node missing id");
-    if (env.seenIds.has(id)) throw new Error(`Duplicate step id "${id}"`);
+    if (!id) throw new SmithersError("TOON_WORKFLOW_INVALID", "Workflow node missing id");
+    if (env.seenIds.has(id)) throw new SmithersError("TOON_DUPLICATE_STEP", `Duplicate step id "${id}"`);
     env.seenIds.add(id);
     const alias = String(node.use ?? "");
-    if (!alias) throw new Error(`Workflow step "${id}" is missing "use"`);
+    if (!alias) throw new SmithersError("TOON_WORKFLOW_INVALID", `Workflow step "${id}" is missing "use"`);
     const workflowPath = env.workflows.get(alias);
-    if (!workflowPath) throw new Error(`Workflow "${alias}" not found`);
+    if (!workflowPath) throw new SmithersError("TOON_NOT_FOUND", `Workflow "${alias}" not found`);
     const inputDef = isRecord(node.input) ? node.input : {};
     const deps = new Set<string>();
     for (const value of Object.values(inputDef)) {
@@ -1997,10 +1999,10 @@ function compileNode(node: any, env: ToonEnv): BuilderNode {
   }
   if (kind === "component") {
     const instanceId = String(node.id ?? "").trim();
-    if (!instanceId) throw new Error("Component instance is missing id");
+    if (!instanceId) throw new SmithersError("TOON_WORKFLOW_INVALID", "Component instance is missing id");
     const useName = String(node.use ?? "");
     const def = env.components.get(useName);
-    if (!def) throw new Error(`Component "${useName}" not found`);
+    if (!def) throw new SmithersError("TOON_NOT_FOUND", `Component "${useName}" not found`);
     const withParams = isRecord(node.with) ? node.with : {};
     const appliedParams: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(withParams)) {
@@ -2022,8 +2024,8 @@ function compileNode(node: any, env: ToonEnv): BuilderNode {
   }
   if (kind === "approval") {
     const id = String(applyComponentId(node.id, env.componentId) ?? "");
-    if (!id) throw new Error("Approval node missing id");
-    if (env.seenIds.has(id)) throw new Error(`Duplicate step id "${id}"`);
+    if (!id) throw new SmithersError("TOON_WORKFLOW_INVALID", "Approval node missing id");
+    if (env.seenIds.has(id)) throw new SmithersError("TOON_DUPLICATE_STEP", `Duplicate step id "${id}"`);
     env.seenIds.add(id);
     const deps = new Set<string>();
     for (const dep of coerceUseList(node.needs)) {
@@ -2065,12 +2067,12 @@ function compileNode(node: any, env: ToonEnv): BuilderNode {
       registerPluginHandles(env, result);
       return result;
     }
-    throw new Error(`Unknown TOON node kind "${kind}"`);
+    throw new SmithersError("TOON_UNKNOWN_NODE", `Unknown TOON node kind "${kind}"`);
   }
 
   const id = String(applyComponentId(node.id, env.componentId) ?? "");
-  if (!id) throw new Error("Step node missing id");
-  if (env.seenIds.has(id)) throw new Error(`Duplicate step id "${id}"`);
+  if (!id) throw new SmithersError("TOON_WORKFLOW_INVALID", "Step node missing id");
+  if (env.seenIds.has(id)) throw new SmithersError("TOON_DUPLICATE_STEP", `Duplicate step id "${id}"`);
   env.seenIds.add(id);
 
   const outputDef = node.output;
@@ -2081,7 +2083,7 @@ function compileNode(node: any, env: ToonEnv): BuilderNode {
     outputEntry = parseSchemaEntry(outputDef, env.schemas, id);
   }
   if (!outputEntry) {
-    throw new Error(`Step "${id}" is missing output schema`);
+    throw new SmithersError("TOON_STEP_MISSING_OUTPUT", `Step "${id}" is missing output schema`);
   }
 
   // Resolve prompt: can be inline text or a reference to a named prompt
@@ -2094,7 +2096,7 @@ function compileNode(node: any, env: ToonEnv): BuilderNode {
   const hasHandler = typeof handlerRef === "string";
 
   if ((hasPrompt ? 1 : 0) + (hasRun ? 1 : 0) + (hasHandler ? 1 : 0) !== 1) {
-    throw new Error(`Step "${id}" must define exactly one of prompt, run, or handler`);
+    throw new SmithersError("TOON_STEP_AMBIGUOUS", `Step "${id}" must define exactly one of prompt, run, or handler`);
   }
 
   const deps = new Set<string>();
@@ -2159,11 +2161,11 @@ function compileNode(node: any, env: ToonEnv): BuilderNode {
   if (hasPrompt) {
     const agentName = String(node.agent ?? "");
     if (!agentName) {
-      throw new Error(`Prompt step "${id}" requires an agent`);
+      throw new SmithersError("TOON_STEP_MISSING_AGENT", `Prompt step "${id}" requires an agent`);
     }
     const agent = env.agents.get(agentName);
     if (!agent) {
-      throw new Error(`Agent "${agentName}" not found for step "${id}"`);
+      throw new SmithersError("TOON_STEP_MISSING_AGENT", `Agent "${agentName}" not found for step "${id}"`);
     }
     const timeoutMs = durationToMs(node.timeout);
     runFn = async (ctx: any) => {
@@ -2193,7 +2195,7 @@ function compileNode(node: any, env: ToonEnv): BuilderNode {
         const mod = await importModule(handler.modulePath, env.baseDir);
         const fn = handler.exportName ? mod[handler.exportName] : mod.default;
         if (typeof fn !== "function") {
-          throw new Error(`Handler "${handlerRef}" did not export a function`);
+          throw new SmithersError("TOON_HANDLER_INVALID", `Handler "${handlerRef}" did not export a function`);
         }
         cached.mod = mod;
         cached.fn = fn;
@@ -2252,15 +2254,16 @@ async function compileToon(absPath: string): Promise<{
   name: string;
   inputSchema: AnySchema;
   buildGraph: (builder: BuilderApi) => BuilderNode;
-  pluginLayers: Layer<never, never, never>[];
+  pluginLayers: Layer.Layer<never, never, never>[];
 }> {
   const rawText = readFileSync(absPath, "utf8");
-  const data = parseToon(rawText);
-  if (!isRecord(data)) {
-    throw new Error(`Invalid TOON file: ${absPath}`);
+  const rawData = parseToon(rawText);
+  if (!isRecord(rawData)) {
+    throw new SmithersError("TOON_INVALID_FILE", `Invalid TOON file: ${absPath}`);
   }
+  const data = rawData as Record<string, any>;
   const name = String(data.name ?? "").trim();
-  if (!name) throw new Error(`TOON workflow missing name: ${absPath}`);
+  if (!name) throw new SmithersError("TOON_WORKFLOW_INVALID", `TOON workflow missing name: ${absPath}`);
   const baseDir = dirname(absPath);
 
   const imports = isRecord(data.imports) ? data.imports : {};
@@ -2278,7 +2281,7 @@ async function compileToon(absPath: string): Promise<{
   if (isRecord(data.schemas)) {
     for (const [schemaName, def] of Object.entries(data.schemas)) {
       if (schemas.has(schemaName)) {
-        throw new Error(`Duplicate schema "${schemaName}" in ${absPath}`);
+        throw new SmithersError("TOON_DUPLICATE_SCHEMA", `Duplicate schema "${schemaName}" in ${absPath}`);
       }
       schemas.set(schemaName, parseSchemaEntry(def, schemas, schemaName));
     }
@@ -2288,10 +2291,10 @@ async function compileToon(absPath: string): Promise<{
   if (isRecord(data.components)) {
     for (const [compName, def] of Object.entries(data.components)) {
       if (components.has(compName)) {
-        throw new Error(`Duplicate component "${compName}" in ${absPath}`);
+        throw new SmithersError("TOON_DUPLICATE_COMPONENT", `Duplicate component "${compName}" in ${absPath}`);
       }
       if (!isRecord(def) || !Array.isArray((def as any).steps)) {
-        throw new Error(`Component "${compName}" is missing steps`);
+        throw new SmithersError("TOON_COMPONENT_MISSING_STEPS", `Component "${compName}" is missing steps`);
       }
       components.set(compName, {
         name: compName,
@@ -2306,7 +2309,7 @@ async function compileToon(absPath: string): Promise<{
     // Object form: agents: { name: { type, model, ... } }
     for (const [agentName, def] of Object.entries(data.agents)) {
       if (!isRecord(def)) {
-        throw new Error(`Agent "${agentName}" definition must be an object`);
+        throw new SmithersError("TOON_AGENT_CONFIG_INVALID", `Agent "${agentName}" definition must be an object`);
       }
       const agent = await buildAgentFromConfig(agentName, def);
       agents.set(agentName, agent);
@@ -2315,7 +2318,7 @@ async function compileToon(absPath: string): Promise<{
     // Tabular form: agents[N]{name,type,model,...}: rows
     for (const row of data.agents) {
       if (!isRecord(row) || typeof row.name !== "string") {
-        throw new Error(`Agent array entry must have a "name" field`);
+        throw new SmithersError("TOON_AGENT_CONFIG_INVALID", `Agent array entry must have a "name" field`);
       }
       const agentName = row.name;
       const def = { ...row };
@@ -2349,21 +2352,21 @@ async function compileToon(absPath: string): Promise<{
   if (isRecord(data.prompts)) {
     for (const [promptName, promptText] of Object.entries(data.prompts)) {
       if (typeof promptText !== "string") {
-        throw new Error(`Prompt "${promptName}" must be a string`);
+        throw new SmithersError("TOON_WORKFLOW_INVALID", `Prompt "${promptName}" must be a string`);
       }
       prompts.set(promptName, promptText);
     }
   }
 
   const inputDef = data.input;
-  if (!inputDef) throw new Error(`TOON workflow "${name}" missing input schema`);
+  if (!inputDef) throw new SmithersError("TOON_WORKFLOW_INVALID", `TOON workflow "${name}" missing input schema`);
   const inputSchema = typeof inputDef === "string" && schemas.has(inputDef)
     ? schemas.get(inputDef)!.schema
     : parseSchemaEntry(inputDef, schemas, "input").schema;
 
   const steps = Array.isArray(data.steps) ? data.steps : [];
   if (steps.length === 0) {
-    throw new Error(`TOON workflow "${name}" has no steps`);
+    throw new SmithersError("TOON_WORKFLOW_INVALID", `TOON workflow "${name}" has no steps`);
   }
   const buildGraph = (builder: BuilderApi) => {
     const env: ToonEnv = {
@@ -2396,7 +2399,8 @@ function getToonWorkflow(path: string): Promise<BuiltSmithersWorkflow> {
       ($) => compiled.buildGraph($),
     );
     if (compiled.pluginLayers.length === 0) return workflow;
-    const merged = Layer.mergeAll(...compiled.pluginLayers);
+    const merged = Layer.mergeAll(...(compiled.pluginLayers as [Layer.Layer<never, never, never>, ...Layer.Layer<never, never, never>[]]));
+
     return {
       execute: (input: unknown, opts?: Omit<Parameters<typeof runWorkflow>[1], "input">) =>
         workflow.execute(input, opts).pipe(Effect.provide(merged)),
