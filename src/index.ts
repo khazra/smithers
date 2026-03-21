@@ -14,6 +14,8 @@ export type { SmithersCtx } from "./SmithersCtx";
 export type { OutputAccessor, InferRow, InferOutputEntry } from "./OutputAccessor";
 export type { SmithersEvent } from "./SmithersEvent";
 export type { SmithersError } from "./SmithersError";
+export { SmithersError as SmithersErrorInstance, isSmithersError, errorToJson } from "./utils/errors";
+export type { SmithersErrorCode } from "./utils/errors";
 export type {
   ResolvedSmithersObservabilityOptions,
   SmithersLogFormat,
