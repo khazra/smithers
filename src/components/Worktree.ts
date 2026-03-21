@@ -1,5 +1,6 @@
 import React from "react";
 import { WORKTREE_EMPTY_PATH_ERROR } from "../constants";
+import { SmithersError } from "../utils/errors";
 
 export type WorktreeProps = {
   id?: string;
@@ -13,7 +14,7 @@ export type WorktreeProps = {
 
 export function Worktree(props: WorktreeProps) {
   if (typeof props.path !== "string" || props.path.trim() === "") {
-    throw new Error(WORKTREE_EMPTY_PATH_ERROR);
+    throw new SmithersError("WORKTREE_EMPTY_PATH", WORKTREE_EMPTY_PATH_ERROR);
   }
   if (props.skipIf) return null;
   const next: { id?: string; path: string; branch?: string; baseBranch?: string } = { id: props.id, path: props.path, branch: props.branch, baseBranch: props.baseBranch };

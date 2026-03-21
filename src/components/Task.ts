@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { markdownComponents } from "../markdownComponents";
 import { zodSchemaToJsonExample } from "../zod-to-example";
 import type { AgentLike } from "../AgentLike";
+import { SmithersError } from "../utils/errors";
 import type { CachePolicy } from "../CachePolicy";
 import type { RetryPolicy } from "../RetryPolicy";
 
@@ -72,7 +73,8 @@ function renderChildrenToText(children: any): string {
   } catch (err) {
     const result = String(children ?? "");
     if (result === "[object Object]") {
-      throw new Error(
+      throw new SmithersError(
+        "MDX_PRELOAD_INACTIVE",
         `MDX prompt could not be rendered — the prompt resolved to [object Object] instead of a React component.\n\n` +
           `This usually means the MDX preload is not active. Common causes:\n` +
           `  • bunfig.toml uses [run] preload instead of top-level preload (the [run] section doesn't apply to dynamic imports)\n` +

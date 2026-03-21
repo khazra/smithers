@@ -2,6 +2,7 @@ import React from "react";
 import { z } from "zod";
 import { getTaskRuntime } from "../effect/task-runtime";
 import { SmithersDb } from "../db/adapter";
+import { SmithersError } from "../utils/errors";
 
 export const approvalDecisionSchema = z.object({
   approved: z.boolean(),
@@ -56,7 +57,8 @@ export function Approval<Row = ApprovalDecision>(props: ApprovalProps<Row>) {
   const computeDecision = async (): Promise<ApprovalDecision> => {
     const runtime = getTaskRuntime();
     if (!runtime) {
-      throw new Error(
+      throw new SmithersError(
+        "APPROVAL_OUTSIDE_TASK",
         "Approval decisions can only be resolved while a Smithers task is executing.",
       );
     }

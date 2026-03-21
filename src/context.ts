@@ -2,6 +2,7 @@ import React from "react";
 import { getTableName } from "drizzle-orm";
 import type { SmithersCtx } from "./SmithersCtx";
 import type { OutputKey } from "./OutputKey";
+import { SmithersError } from "./utils/errors";
 
 export type OutputSnapshot = {
   [tableName: string]: Array<any>;
@@ -157,8 +158,10 @@ export function buildContext<Schema>(opts: {
     output(table: any, key: OutputKey): any {
       const row = resolveRow(table, key);
       if (!row) {
-        throw new Error(
+        throw new SmithersError(
+          "MISSING_OUTPUT",
           `Missing output for nodeId=${key.nodeId} iteration=${key.iteration ?? 0}`,
+          { nodeId: key.nodeId, iteration: key.iteration ?? 0 },
         );
       }
       return row;
@@ -229,7 +232,8 @@ export function createSmithersContext<Schema>() {
   function useCtx(): SmithersCtx<Schema> {
     const ctx = React.useContext(SmithersContext);
     if (!ctx) {
-      throw new Error(
+      throw new SmithersError(
+        "CONTEXT_OUTSIDE_WORKFLOW",
         "useCtx() must be called inside a <Workflow> created by createSmithers()",
       );
     }
