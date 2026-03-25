@@ -133,7 +133,7 @@ export {
   vcsDuration,
 } from "./observability";
 
-// Effect builder (internal, exposes Toon + SQLite helpers)
+// Effect builder (internal, includes experimental .toon support and SQLite helpers)
 export { Smithers } from "./effect/builder";
 export type { SmithersSqliteOptions } from "./effect/builder";
 

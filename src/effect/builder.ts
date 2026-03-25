@@ -2430,6 +2430,7 @@ function sqlite(options: SmithersSqliteOptions) {
   return Layer.succeed(SmithersSqlite, options);
 }
 
+// Experimental internal workflow format. Public docs intentionally do not cover `.toon` files.
 function loadToon(path: string): BuiltSmithersWorkflow {
   return {
     execute(input: unknown, opts?: Omit<Parameters<typeof runWorkflow>[1], "input">) {
