@@ -14,6 +14,7 @@ import {
 import type { BaseCliAgentOptions, PiExtensionUiRequest, PiExtensionUiResponse } from "./BaseCliAgent";
 import { getToolContext } from "../tools/context";
 import { SmithersError } from "../utils/errors";
+import { launchDiagnostics, enrichReportWithErrorAnalysis } from "./diagnostics";
 
 export type { PiExtensionUiRequest, PiExtensionUiResponse };
 
@@ -155,55 +156,70 @@ export class PiAgent extends BaseCliAgent {
     if (this.opts.verbose) args.push("--verbose");
     if (this.extraArgs?.length) args.push(...this.extraArgs);
 
-    if (mode !== "rpc") {
-      // File args as @path
-      if (this.opts.files) {
-        for (const f of this.opts.files) {
-          args.push(`@${f}`);
-        }
-      }
-      // Prompt as last positional arg
-      if (prompt) args.push(prompt);
+    // Launch diagnostics optimistically alongside the agent
+    const diagnosticsPromise = launchDiagnostics("pi", env, cwd);
 
-      const result = await runCommand("pi", args, {
+    try {
+      if (mode !== "rpc") {
+        // File args as @path
+        if (this.opts.files) {
+          for (const f of this.opts.files) {
+            args.push(`@${f}`);
+          }
+        }
+        // Prompt as last positional arg
+        if (prompt) args.push(prompt);
+
+        const result = await runCommand("pi", args, {
+          cwd,
+          env,
+          timeoutMs: callTimeouts.totalMs,
+          idleTimeoutMs: callTimeouts.idleMs,
+          signal: options?.abortSignal,
+          maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
+          onStdout: options?.onStdout,
+          onStderr: options?.onStderr,
+        });
+
+        if (result.exitCode && result.exitCode !== 0) {
+          throw new SmithersError("AGENT_CLI_ERROR", result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`);
+        }
+
+        const rawText = result.stdout.trim();
+        // In json mode, pi outputs NDJSON stream. Extract text from turn_end message
+        // rather than returning the first JSON object (session metadata).
+        const extractedText = mode === "json"
+          ? (extractTextFromPiNdjson(rawText) ?? rawText)
+          : rawText;
+        const output = tryParseJson(extractedText);
+        return buildGenerateResult(extractedText, output, this.opts.model ?? "pi");
+      }
+
+      // RPC mode
+      const rpcResult = await runRpcCommand("pi", args, {
         cwd,
         env,
+        prompt,
         timeoutMs: callTimeouts.totalMs,
         idleTimeoutMs: callTimeouts.idleMs,
         signal: options?.abortSignal,
         maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
-        onStdout: options?.onStdout,
         onStderr: options?.onStderr,
+        onExtensionUiRequest: this.opts.onExtensionUiRequest,
       });
 
-      if (result.exitCode && result.exitCode !== 0) {
-        throw new SmithersError("AGENT_CLI_ERROR", result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`);
+      return buildGenerateResult(rpcResult.text, rpcResult.output, this.opts.model ?? "pi", rpcResult.usage);
+    } catch (err) {
+      // Enrich error with diagnostics on failure
+      if (diagnosticsPromise) {
+        const report = await diagnosticsPromise.catch(() => null);
+        if (report && err instanceof SmithersError) {
+          enrichReportWithErrorAnalysis(report, err.message);
+          err.details = { ...err.details, diagnostics: report };
+        }
       }
-
-      const rawText = result.stdout.trim();
-      // In json mode, pi outputs NDJSON stream. Extract text from turn_end message
-      // rather than returning the first JSON object (session metadata).
-      const extractedText = mode === "json"
-        ? (extractTextFromPiNdjson(rawText) ?? rawText)
-        : rawText;
-      const output = tryParseJson(extractedText);
-      return buildGenerateResult(extractedText, output, this.opts.model ?? "pi");
+      throw err;
     }
-
-    // RPC mode
-    const rpcResult = await runRpcCommand("pi", args, {
-      cwd,
-      env,
-      prompt,
-      timeoutMs: callTimeouts.totalMs,
-      idleTimeoutMs: callTimeouts.idleMs,
-      signal: options?.abortSignal,
-      maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
-      onStderr: options?.onStderr,
-      onExtensionUiRequest: this.opts.onExtensionUiRequest,
-    });
-
-    return buildGenerateResult(rpcResult.text, rpcResult.output, this.opts.model ?? "pi", rpcResult.usage);
   }
 
   protected async buildCommand(_params: {
