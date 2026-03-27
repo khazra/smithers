@@ -204,6 +204,7 @@ function isZodSchema(val: any): val is z.ZodObject<any> {
 }
 
 function describeZodType(schema: z.ZodType): string {
+  // Zod v4: uses _zod.def
   if ((schema as any)._zod?.def) {
     const def = (schema as any)._zod.def;
     const typeName = def.type;
@@ -224,6 +225,31 @@ function describeZodType(schema: z.ZodType): string {
     if (typeName === "enum") return `enum(${(def.values ?? []).join(" | ")})`;
     if (typeName === "literal") return `literal(${JSON.stringify(def.value)})`;
     if (typeName === "union") {
+      const options = (def.options ?? []).map((o: z.ZodType) => describeZodType(o));
+      return options.join(" | ");
+    }
+  }
+  // Zod v3: uses _def.typeName
+  if ((schema as any)._def?.typeName) {
+    const typeName = (schema as any)._def.typeName as string;
+    const def = (schema as any)._def;
+    if (typeName === "ZodOptional" || typeName === "ZodDefault" || typeName === "ZodNullable") {
+      const inner = def.innerType ? describeZodType(def.innerType) : "unknown";
+      if (typeName === "ZodOptional") return `${inner} (optional)`;
+      if (typeName === "ZodNullable") return `${inner} | null`;
+      return inner;
+    }
+    if (typeName === "ZodString") return "string";
+    if (typeName === "ZodNumber") return "number";
+    if (typeName === "ZodBoolean") return "boolean";
+    if (typeName === "ZodArray") {
+      const itemType = def.type ? describeZodType(def.type) : "unknown";
+      return `${itemType}[]`;
+    }
+    if (typeName === "ZodObject") return "object";
+    if (typeName === "ZodEnum") return `enum(${(def.values ?? []).join(" | ")})`;
+    if (typeName === "ZodLiteral") return `literal(${JSON.stringify(def.value)})`;
+    if (typeName === "ZodUnion") {
       const options = (def.options ?? []).map((o: z.ZodType) => describeZodType(o));
       return options.join(" | ");
     }
