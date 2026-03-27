@@ -1060,22 +1060,13 @@ async function computeTaskStates(
       desc.nodeId,
       desc.iteration,
     );
-    const inProgress = attempts.find((a: any) => a.state === "in-progress");
-    if (inProgress) {
-      stateMap.set(key, "in-progress");
-      await adapter.insertNode({
-        runId,
-        nodeId: desc.nodeId,
-        iteration: desc.iteration,
-        state: "in-progress",
-        lastAttempt: inProgress.attempt,
-        updatedAtMs: nowMs(),
-        outputTable: desc.outputTableName,
-        label: desc.label ?? null,
-      });
-      continue;
-    }
 
+    // Check for a valid output row BEFORE checking attempt state.
+    // After hot reload (or resume/restart), a task may have a stale
+    // "in-progress" attempt in the DB even though its output was already
+    // written.  By checking the output first we let the Sequence
+    // fast-forward through already-completed children in the same render
+    // cycle instead of waiting for a completion event that will never fire.
     const outputRow = await selectOutputRow<any>(db, desc.outputTable as any, {
       runId,
       nodeId: desc.nodeId,
@@ -1098,6 +1089,22 @@ async function computeTaskStates(
         });
         continue;
       }
+    }
+
+    const inProgress = attempts.find((a: any) => a.state === "in-progress");
+    if (inProgress) {
+      stateMap.set(key, "in-progress");
+      await adapter.insertNode({
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        state: "in-progress",
+        lastAttempt: inProgress.attempt,
+        updatedAtMs: nowMs(),
+        outputTable: desc.outputTableName,
+        label: desc.label ?? null,
+      });
+      continue;
     }
 
     if (desc.ralphId && ralphDone.get(desc.ralphId)) {

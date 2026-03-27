@@ -576,4 +576,97 @@ describe("scheduleTasks", () => {
     expect(buildStateKey("myNode", 3)).toBe("myNode::3");
     expect(buildStateKey("a", 0)).toBe("a::0");
   });
+
+  test("sequence fast-forwards through multiple finished children", () => {
+    // Simulates hot-reload catch-up: many children are already finished,
+    // the scheduler should skip past all of them in a single pass and
+    // schedule the first pending child.
+    const plan: PlanNode = {
+      kind: "sequence",
+      children: [
+        { kind: "task", nodeId: "a" },
+        { kind: "task", nodeId: "b" },
+        { kind: "task", nodeId: "c" },
+        { kind: "task", nodeId: "d" },
+        { kind: "task", nodeId: "e" },
+      ],
+    };
+    const states: TaskStateMap = new Map([
+      [buildStateKey("a", 0), "finished"],
+      [buildStateKey("b", 0), "finished"],
+      [buildStateKey("c", 0), "finished"],
+      [buildStateKey("d", 0), "finished"],
+    ]);
+    const descs = makeDescMap(
+      desc("a"),
+      desc("b"),
+      desc("c"),
+      desc("d"),
+      desc("e"),
+    );
+    const result = scheduleTasks(
+      plan,
+      states,
+      descs,
+      new Map(),
+      new Map(),
+      Date.now(),
+    );
+    expect(result.runnable.map((r) => r.nodeId)).toEqual(["e"]);
+    expect(result.pendingExists).toBe(true);
+  });
+
+  test("sequence completes when all children are already finished", () => {
+    // After hot-reload, all tasks in the sequence may already be done.
+    // The scheduler should report no runnable and no pending.
+    const plan: PlanNode = {
+      kind: "sequence",
+      children: [
+        { kind: "task", nodeId: "a" },
+        { kind: "task", nodeId: "b" },
+        { kind: "task", nodeId: "c" },
+      ],
+    };
+    const states: TaskStateMap = new Map([
+      [buildStateKey("a", 0), "finished"],
+      [buildStateKey("b", 0), "finished"],
+      [buildStateKey("c", 0), "finished"],
+    ]);
+    const descs = makeDescMap(desc("a"), desc("b"), desc("c"));
+    const result = scheduleTasks(
+      plan,
+      states,
+      descs,
+      new Map(),
+      new Map(),
+      Date.now(),
+    );
+    expect(result.runnable).toEqual([]);
+    expect(result.pendingExists).toBe(false);
+  });
+
+  test("sequence fast-forwards through mixed finished and skipped children", () => {
+    const plan: PlanNode = {
+      kind: "sequence",
+      children: [
+        { kind: "task", nodeId: "a" },
+        { kind: "task", nodeId: "b" },
+        { kind: "task", nodeId: "c" },
+      ],
+    };
+    const states: TaskStateMap = new Map([
+      [buildStateKey("a", 0), "finished"],
+      [buildStateKey("b", 0), "skipped"],
+    ]);
+    const descs = makeDescMap(desc("a"), desc("b"), desc("c"));
+    const result = scheduleTasks(
+      plan,
+      states,
+      descs,
+      new Map(),
+      new Map(),
+      Date.now(),
+    );
+    expect(result.runnable.map((r) => r.nodeId)).toEqual(["c"]);
+  });
 });
