@@ -1,6 +1,7 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test, afterEach, beforeEach } from "bun:test";
 import type { Server } from "node:http";
+import { Database } from "bun:sqlite";
 import { startServer, type ServerOptions } from "../src/server/index";
 import { ensureSmithersTables } from "../src/db/ensure";
 import { createTestDb, sleep } from "./helpers";
@@ -64,7 +65,39 @@ describe("HTTP Server", () => {
     request = makeRequest(port);
   }
 
-  function writeTestWorkflow(name: string, dbPath: string, options: { needsApproval?: boolean; slow?: boolean } = {}) {
+  async function waitForRunStatus(
+    runId: string,
+    statuses: string[],
+    timeoutMs = 5_000,
+  ) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const { status, data } = await request(`/v1/runs/${runId}`);
+      if (status === 200 && statuses.includes(data.status)) {
+        return data;
+      }
+      await sleep(50);
+    }
+    throw new Error(`Timed out waiting for run ${runId} to reach one of: ${statuses.join(", ")}`);
+  }
+
+  function readOutputValue(dbPath: string, runId: string) {
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      const row = db
+        .query("SELECT value FROM output_a WHERE run_id = ? AND node_id = 'task1' LIMIT 1")
+        .get(runId) as { value: number } | null;
+      return row?.value;
+    } finally {
+      db.close();
+    }
+  }
+
+  function writeTestWorkflow(
+    name: string,
+    dbPath: string,
+    options: { needsApproval?: boolean; slow?: boolean; value?: number } = {},
+  ) {
     const workflowPath = resolve(testDir, `${name}.tsx`);
     const slowAgent = options.slow ? `
 const fakeAgent = {
@@ -77,6 +110,7 @@ const fakeAgent = {
 };` : "";
     const agentProp = options.slow ? " agent={fakeAgent}" : "";
     const approvalProp = options.needsApproval ? " needsApproval" : "";
+    const outputValue = options.value ?? 42;
     
     writeFileSync(
       workflowPath,
@@ -93,7 +127,7 @@ const fakeAgent = {
 	export default smithers((ctx) => (
 	  <Workflow name="${name}">
 	    <Task id="task1" output={outputs.outputA}${agentProp}${approvalProp}>
-	      ${options.slow ? "run task" : "{{ value: 42 }}"}
+	      ${options.slow ? "run task" : `{{ value: ${outputValue} }}`}
 	    </Task>
 	  </Workflow>
 	));
@@ -144,6 +178,31 @@ const fakeAgent = {
       expect(status).toBe(500);
       expect(data.error).toBeDefined();
       expect(data.error.code).toBe("SERVER_ERROR");
+    });
+
+    test("reloads a workflow file after it changes on disk", async () => {
+      const dbPath = resolve(testDir, "reload.db");
+      const workflowPath = writeTestWorkflow("reload", dbPath, { value: 42 });
+      startTestServer();
+
+      const firstRun = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+      expect(firstRun.status).toBe(200);
+      await waitForRunStatus(firstRun.data.runId, ["finished"]);
+      expect(readOutputValue(dbPath, firstRun.data.runId)).toBe(42);
+
+      await sleep(25);
+      writeTestWorkflow("reload", dbPath, { value: 7 });
+
+      const secondRun = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+      expect(secondRun.status).toBe(200);
+      await waitForRunStatus(secondRun.data.runId, ["finished"]);
+      expect(readOutputValue(dbPath, secondRun.data.runId)).toBe(7);
     });
 
     test("returns 400 for invalid JSON body", async () => {
