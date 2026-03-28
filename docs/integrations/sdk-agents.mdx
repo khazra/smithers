@@ -3,12 +3,7 @@ title: SDK Agents
 description: Provider-backed AI SDK agent wrappers for Anthropic and OpenAI that work like first-class Smithers agents.
 ---
 
-Smithers ships direct SDK agent classes for the API-billed path:
-
-- `AnthropicAgent`
-- `OpenAIAgent`
-
-They are thin wrappers around the AI SDK `ToolLoopAgent`, but they let you configure agents with the same class-style ergonomics as the CLI-backed agents.
+`AnthropicAgent` and `OpenAIAgent` are thin wrappers around the AI SDK `ToolLoopAgent` with class-style ergonomics matching the CLI agents.
 
 ## Import
 
@@ -39,8 +34,6 @@ const codex = new OpenAIAgent({
 });
 ```
 
-Use them anywhere Smithers accepts an `agent`:
-
 ```tsx
 {/* outputs comes from createSmithers() */}
 <Task id="plan" output={outputs.plan} agent={claude}>
@@ -50,16 +43,11 @@ Use them anywhere Smithers accepts an `agent`:
 
 ## Model Input
 
-Both classes accept either:
-
-- a model id string, such as `"claude-opus-4-6"` or `"gpt-5.3-codex"`
-- a prebuilt AI SDK language model instance for advanced setups
-
-That means you can stay with the simple string form in application code, but still inject a custom model object in tests.
+Both classes accept a model ID string (`"claude-opus-4-6"`, `"gpt-5.3-codex"`) or a prebuilt AI SDK language model instance.
 
 ## Options
 
-The constructors forward the normal AI SDK `ToolLoopAgent` settings, including:
+Constructors forward standard AI SDK `ToolLoopAgent` settings:
 
 - `instructions`
 - `tools`
@@ -69,15 +57,34 @@ The constructors forward the normal AI SDK `ToolLoopAgent` settings, including:
 - `providerOptions`
 - `prepareCall`
 
-The only Smithers-specific difference is the `model` prop: the wrapper resolves model-id strings for you.
+The only addition is `model`: the wrapper resolves model-ID strings automatically.
+
+## Hijack Support
+
+SDK agents do not reopen a provider-native CLI. Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `smithers hijack <runId>`.
+
+Live-run behavior:
+
+- Smithers captures response history after each step via `onStepFinish`.
+- `smithers hijack` waits until history is durable, cancels the live run, and opens the REPL.
+- On clean REPL exit, Smithers writes updated message history back and resumes the workflow automatically.
+
+Limits:
+
+- Conversation hijack stays on the same agent implementation. Cross-engine hijack is not supported.
+- Smithers reconstructs the original task agent from the workflow source.
 
 ## CLI vs SDK
 
-- Use [CLI Agents](/integrations/cli-agents) when you want the provider's native CLI tool ecosystem and subscription billing.
-- Use SDK agents when you want API billing, provider options, or Smithers' own tool sandbox via `tools`.
-- You can still pass a raw `ToolLoopAgent` instance if you prefer. The wrappers are convenience, not a separate runtime.
+| | CLI Agents | SDK Agents |
+|---|---|---|
+| Billing | Provider subscription / local CLI | API billing |
+| Tools | Provider CLI tool ecosystem | Smithers `tools` sandbox |
+| Flexibility | Native CLI flags | AI SDK `providerOptions` |
 
-## Example Dual Setup
+Pass a raw `ToolLoopAgent` directly if you prefer. The wrappers are convenience, not a separate runtime.
+
+## Example: Dual Setup
 
 ```ts
 const useCli = process.env.USE_CLI_AGENTS === "1";
@@ -95,4 +102,4 @@ export const claude = useCli
     });
 ```
 
-For a broader comparison, see [Model Selection](/guides/model-selection).
+See [Model Selection](/guides/model-selection) for a broader comparison.

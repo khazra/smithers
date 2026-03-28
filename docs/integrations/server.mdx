@@ -3,7 +3,9 @@ title: HTTP Server
 description: Expose Smithers workflows over HTTP with a built-in server supporting run management, SSE event streaming, and human-in-the-loop approvals.
 ---
 
-Smithers includes a built-in HTTP server that exposes workflows via a REST API. You can start runs, resume interrupted workflows, stream lifecycle events via Server-Sent Events, and approve or deny human-in-the-loop gates -- all over HTTP.
+Multi-workflow HTTP server exposing workflows via REST. Supports run management, SSE event streaming, and human-in-the-loop approvals.
+
+For a lighter single-workflow server that runs alongside `smithers up`, see [Serve Mode](/integrations/serve).
 
 ## Import
 
@@ -26,36 +28,7 @@ const server = startServer({
   rootDir: process.cwd(),
   allowNetwork: false,
 });
-
-console.log("Smithers server listening on port 7331");
 ```
-
-## Observability
-
-The HTTP server participates in the same observability pipeline as local workflow execution.
-
-- requests increment `smithers.http.requests`
-- latency records into `smithers.http.request_duration_ms`
-- request handling, workflow loading, and body parsing are wrapped in spans
-- the server exposes a direct Prometheus scrape endpoint at `/metrics`
-
-To export those signals, enable the OTLP runtime with environment variables:
-
-```bash
-export SMITHERS_OTEL_ENABLED=1
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export OTEL_SERVICE_NAME=smithers-server
-```
-
-For a ready-made local collector, Prometheus, Tempo, and Grafana stack, run:
-
-```bash
-docker compose -f observability/docker-compose.otel.yml up
-```
-
-See [Observability](/guides/monitoring-logs) for the public layer API and built-in metrics list.
-
----
 
 ## ServerOptions
 
@@ -72,67 +45,69 @@ type ServerOptions = {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `port` | `number` | `7331` | TCP port to listen on |
-| `db` | `BunSQLiteDatabase` | `undefined` | Optional server-level SQLite database for mirroring run/event data and enabling the `GET /v1/runs` endpoint |
-| `authToken` | `string` | `process.env.SMITHERS_API_KEY` | Bearer token for authentication. If not set, falls back to the `SMITHERS_API_KEY` environment variable. If neither is set, authentication is disabled. |
-| `maxBodyBytes` | `number` | `1048576` (1MB) | Maximum request body size in bytes. Requests exceeding this limit receive a 413 response. |
-| `rootDir` | `string` | `undefined` | Root directory for workflow path resolution and tool sandboxing. Workflow paths must resolve within this directory. |
-| `allowNetwork` | `boolean` | `false` | Whether to allow network access in the `bash` tool for all runs started by this server |
+| `port` | `number` | `7331` | TCP port |
+| `db` | `BunSQLiteDatabase` | `undefined` | SQLite database for mirroring run/event data; enables `GET /v1/runs` |
+| `authToken` | `string` | `process.env.SMITHERS_API_KEY` | Bearer token. Falls back to env var. Disabled if neither is set. |
+| `maxBodyBytes` | `number` | `1048576` (1MB) | Max request body size. Returns 413 if exceeded. |
+| `rootDir` | `string` | `undefined` | Root for workflow path resolution and tool sandboxing |
+| `allowNetwork` | `boolean` | `false` | Allow network access in `bash` tool |
 
-### Return Value
-
-`startServer` returns a Node.js `http.Server` instance. The server is already listening when returned.
+Returns an `http.Server` instance, already listening.
 
 ---
 
 ## Authentication
 
-If `authToken` is configured (or `SMITHERS_API_KEY` is set), every request must include a valid token via one of:
+When `authToken` is configured, every request must include:
 
-- **Authorization header:** `Authorization: Bearer <token>`
-- **Custom header:** `x-smithers-key: <token>`
+- `Authorization: Bearer <token>`, or
+- `x-smithers-key: <token>`
 
-Unauthenticated requests receive a `401` response:
+Missing/invalid tokens receive `401`.
 
-```json
-{
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Missing or invalid authorization token"
-  }
-}
+---
+
+## Observability
+
+The server participates in the standard observability pipeline:
+
+- `smithers.http.requests` counter
+- `smithers.http.request_duration_ms` histogram
+- Request handling, workflow loading, and body parsing wrapped in spans
+- Prometheus scrape endpoint at `/metrics`
+
+OTLP export:
+
+```bash
+export SMITHERS_OTEL_ENABLED=1
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_SERVICE_NAME=smithers-server
 ```
+
+Local collector stack:
+
+```bash
+docker compose -f observability/docker-compose.otel.yml up
+```
+
+See [Observability](/guides/monitoring-logs) for the full metrics list.
 
 ---
 
 ## API Routes
 
-All routes use JSON request/response bodies except:
+All routes use JSON request/response bodies except `GET /v1/runs/:runId/events` (SSE) and `GET /metrics` (Prometheus text).
 
-- `GET /v1/runs/:runId/events`, which uses Server-Sent Events
-- `GET /metrics`, which returns Prometheus text exposition
-
-JSON responses include `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff` headers.
+JSON responses include `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`.
 
 ### GET /metrics
 
-Expose the current Smithers runtime metrics in Prometheus text format.
-
-**Response (200):**
+Prometheus text exposition of runtime metrics.
 
 ```txt
 # TYPE smithers_http_requests counter
 smithers_http_requests 12
 ```
-
-**Headers:**
-
-| Header | Value |
-| --- | --- |
-| `Content-Type` | `text/plain; version=0.0.4; charset=utf-8` |
-| `Cache-Control` | `no-store` |
-
-Prometheus can scrape the server directly:
 
 ```yaml
 scrape_configs:
@@ -143,117 +118,67 @@ scrape_configs:
 
 ### POST /v1/runs
 
-Start a new workflow run, or resume an existing one.
-
-**Request body:**
+Start a new workflow run or resume an existing one.
 
 ```ts
 {
-  workflowPath: string;          // Path to the .tsx workflow file (required)
-  input?: Record<string, any>;   // Input data passed to the workflow (default: {})
+  workflowPath: string;          // .tsx workflow file (required)
+  input?: Record<string, any>;   // Workflow input (default: {})
   runId?: string;                // Custom run ID (default: auto-generated)
-  resume?: boolean;              // Resume an existing run (default: false)
-  config?: {
-    maxConcurrency?: number;     // Max parallel tasks
-  };
-}
-```
-
-**Response (200):**
-
-```json
-{
-  "runId": "smi_abc123"
-}
-```
-
-**Behavior:**
-- The workflow file is dynamically imported from `workflowPath` (must export default).
-- The workflow's SQLite tables are automatically created if needed.
-- The run is started asynchronously. The response is returned immediately with the `runId`.
-- If `resume: true`, the `runId` is required and the run must already exist in the database.
-- If a run with the same `runId` is already in progress and `resume` is not set, a `409` error is returned.
-
-**Error responses:**
-
-| Status | Code | Condition |
-|---|---|---|
-| 400 | `INVALID_REQUEST` | Missing or invalid `workflowPath`, `input`, or `config` |
-| 400 | `RUN_ID_REQUIRED` | `resume: true` but no `runId` provided |
-| 400 | `WORKFLOW_PATH_OUTSIDE_ROOT` | Workflow path resolves outside `rootDir` |
-| 404 | `RUN_NOT_FOUND` | `resume: true` but the run does not exist |
-| 409 | `RUN_IN_PROGRESS` | A run with this `runId` is already active |
-| 409 | `RUN_ALREADY_EXISTS` | A run with this `runId` already exists (and `resume` is false) |
-
----
-
-### POST /v1/runs/:runId/resume
-
-Resume a previously paused or failed workflow run.
-
-**Request body:**
-
-```ts
-{
-  workflowPath: string;          // Path to the .tsx workflow file (required)
-  input?: Record<string, any>;   // Input data (default: {})
+  resume?: boolean;              // Resume existing run (default: false)
   config?: {
     maxConcurrency?: number;
   };
 }
 ```
 
-**Response (200):**
+Response: `{ "runId": "smi_abc123" }`
 
-```json
-{
-  "runId": "smi_abc123"
-}
-```
-
-**Behavior:**
-- The run must already exist in the database.
-- If the run is currently active, returns `200` with the current status without starting a new process.
-- Otherwise, reloads the workflow and resumes execution from the last checkpoint.
-
-**Error responses:**
+The workflow is dynamically imported, tables are auto-created, and the run starts asynchronously.
 
 | Status | Code | Condition |
 |---|---|---|
-| 400 | `INVALID_REQUEST` | Missing or invalid `workflowPath` |
-| 404 | `RUN_NOT_FOUND` | Run does not exist |
+| 400 | `INVALID_REQUEST` | Missing/invalid `workflowPath`, `input`, or `config` |
+| 400 | `RUN_ID_REQUIRED` | `resume: true` without `runId` |
+| 400 | `WORKFLOW_PATH_OUTSIDE_ROOT` | Path resolves outside `rootDir` |
+| 404 | `RUN_NOT_FOUND` | `resume: true` but run does not exist |
+| 409 | `RUN_IN_PROGRESS` | Run with this ID already active |
+| 409 | `RUN_ALREADY_EXISTS` | Run with this ID exists (no `resume`) |
 
----
+### POST /v1/runs/:runId/resume
+
+Resume a paused or failed run.
+
+```ts
+{
+  workflowPath: string;
+  input?: Record<string, any>;
+  config?: { maxConcurrency?: number };
+}
+```
+
+Response: `{ "runId": "smi_abc123" }`
+
+If currently active, returns `200` with current status. Otherwise reloads the workflow and resumes from last checkpoint.
+
+| Status | Code | Condition |
+|---|---|---|
+| 400 | `INVALID_REQUEST` | Missing/invalid `workflowPath` |
+| 404 | `RUN_NOT_FOUND` | Run does not exist |
 
 ### POST /v1/runs/:runId/cancel
 
-Cancel a running workflow.
+Cancel a running workflow. Signals the run's `AbortController`.
 
-**Response (200):**
-
-```json
-{
-  "runId": "smi_abc123"
-}
-```
-
-**Behavior:**
-- Signals the run's `AbortController` to cancel execution.
-- If the run is not found in the active run map, returns a `404`.
-
-**Error responses:**
+Response: `{ "runId": "smi_abc123" }`
 
 | Status | Code | Condition |
 |---|---|---|
-| 404 | `NOT_FOUND` | Run not found in active runs |
-
----
+| 404 | `NOT_FOUND` | Run not in active runs |
 
 ### GET /v1/runs/:runId
 
-Get the current status and summary of a run.
-
-**Response (200):**
+Run status and summary.
 
 ```json
 {
@@ -262,38 +187,24 @@ Get the current status and summary of a run.
   "status": "running",
   "startedAtMs": 1707500000000,
   "finishedAtMs": null,
-  "summary": {
-    "finished": 3,
-    "in-progress": 1,
-    "pending": 2
-  }
+  "summary": { "finished": 3, "in-progress": 1, "pending": 2 }
 }
 ```
 
-**Fields:**
-
 | Field | Type | Description |
 |---|---|---|
-| `runId` | `string` | The run identifier |
-| `workflowName` | `string` | Name derived from the workflow file |
-| `status` | `string` | Current status: `running`, `waiting-approval`, `finished`, `failed`, `cancelled` |
-| `startedAtMs` | `number \| null` | Start timestamp in milliseconds |
-| `finishedAtMs` | `number \| null` | Finish timestamp in milliseconds |
-| `summary` | `object` | Node count by state (e.g., `{ finished: 3, pending: 2 }`) |
-
----
+| `status` | `string` | `running`, `waiting-approval`, `finished`, `failed`, `cancelled` |
+| `startedAtMs` | `number \| null` | Start timestamp (ms) |
+| `finishedAtMs` | `number \| null` | Finish timestamp (ms) |
+| `summary` | `object` | Node count by state |
 
 ### GET /v1/runs/:runId/events
 
-Stream lifecycle events via Server-Sent Events (SSE).
-
-**Query parameters:**
+SSE stream of lifecycle events.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `afterSeq` | `number` | `-1` | Only return events after this sequence number |
-
-**Response:** `text/event-stream`
+| `afterSeq` | `number` | `-1` | Only events after this sequence number |
 
 ```
 retry: 1000
@@ -310,102 +221,59 @@ event: smithers
 data: {"type":"NodeFinished","runId":"smi_abc123","nodeId":"analyze","iteration":0,"attempt":0,"timestampMs":1707500010000}
 ```
 
-**Behavior:**
-- Events are named `smithers` with JSON payloads matching the `SmithersEvent` union type.
-- The server polls the database every 500ms for new events.
-- A `: keep-alive` comment is sent every 10 seconds when no events are available.
-- The stream closes automatically when the run reaches a terminal state (`finished`, `failed`, `cancelled`) and all events have been delivered.
-- The client can reconnect using `afterSeq` to resume from where it left off.
-
----
+- Events named `smithers` with JSON payloads matching `SmithersEvent`.
+- Polls database every 500ms.
+- Keep-alive comment every 10s.
+- Closes on terminal state (`finished`, `failed`, `cancelled`).
+- Reconnect with `afterSeq` to resume.
 
 ### GET /v1/runs/:runId/frames
 
-List render frames for a run.
-
-**Query parameters:**
+List render frames.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `limit` | `number` | `50` | Maximum number of frames to return |
-| `afterFrameNo` | `number` | `undefined` | Only return frames after this frame number |
-
-**Response (200):** Array of frame objects.
-
----
+| `limit` | `number` | `50` | Max frames |
+| `afterFrameNo` | `number` | `undefined` | Frames after this number |
 
 ### POST /v1/runs/:runId/nodes/:nodeId/approve
 
-Approve a node that is waiting for human approval.
-
-**Request body:**
+Approve a node waiting for human approval.
 
 ```ts
 {
-  iteration?: number;     // Iteration to approve (default: 0)
-  note?: string;          // Optional approval note
-  decidedBy?: string;     // Who approved
+  iteration?: number;     // Default: 0
+  note?: string;
+  decidedBy?: string;
 }
 ```
-
-**Response (200):**
-
-```json
-{
-  "runId": "smi_abc123"
-}
-```
-
----
 
 ### POST /v1/runs/:runId/nodes/:nodeId/deny
 
-Deny a node that is waiting for human approval.
-
-**Request body:**
+Deny a node waiting for human approval.
 
 ```ts
 {
-  iteration?: number;     // Iteration to deny (default: 0)
-  note?: string;          // Optional denial reason
-  decidedBy?: string;     // Who denied
+  iteration?: number;     // Default: 0
+  note?: string;
+  decidedBy?: string;
 }
 ```
-
-**Response (200):**
-
-```json
-{
-  "runId": "smi_abc123"
-}
-```
-
----
 
 ### GET /v1/runs
 
-List all runs. **Requires a server-level `db`** to be configured.
-
-**Query parameters:**
+List all runs. Requires server-level `db`.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `limit` | `number` | `50` | Maximum number of runs to return |
-| `status` | `string` | `undefined` | Filter by status (e.g., `running`, `finished`) |
+| `limit` | `number` | `50` | Max runs |
+| `status` | `string` | `undefined` | Filter by status |
 
-**Response (200):** Array of run summary objects.
-
-**Error responses:**
-
-| Status | Code | Condition |
-|---|---|---|
-| 400 | `DB_NOT_CONFIGURED` | No server-level database was provided to `startServer` |
+Returns 400 `DB_NOT_CONFIGURED` if no database was provided.
 
 ---
 
 ## Error Response Format
-
-All error responses follow a consistent format:
 
 ```json
 {
@@ -417,19 +285,17 @@ All error responses follow a consistent format:
 }
 ```
 
-Unhandled errors return a `500` with code `SERVER_ERROR`.
+Unhandled errors return 500 with code `SERVER_ERROR`.
 
 ---
 
 ## Database Mirroring
 
-When a server-level `db` is provided and the workflow uses a different database, the server automatically mirrors run metadata and events to the server database. This enables the `GET /v1/runs` endpoint to list runs across all workflows.
-
-Events are mirrored asynchronously and do not block the workflow execution.
+When a server-level `db` is provided and the workflow uses a different database, run metadata and events are mirrored asynchronously to the server database. This enables cross-workflow listing via `GET /v1/runs`.
 
 ---
 
-## Example: Full Server Setup
+## Example
 
 ```ts
 import { startServer } from "smithers-orchestrator";
@@ -442,35 +308,25 @@ const server = startServer({
   db,
   authToken: "sk-my-secret-token",
   rootDir: "/home/workflows",
-  maxBodyBytes: 2 * 1024 * 1024,  // 2MB
+  maxBodyBytes: 2 * 1024 * 1024,
   allowNetwork: false,
 });
 ```
 
-Start a run with `curl`:
-
 ```bash
+# Start a run
 curl -X POST http://localhost:7331/v1/runs \
   -H "Authorization: Bearer sk-my-secret-token" \
   -H "Content-Type: application/json" \
-  -d '{
-    "workflowPath": "./bugfix.tsx",
-    "input": { "description": "Fix the auth token expiry bug" }
-  }'
-```
+  -d '{"workflowPath": "./bugfix.tsx", "input": {"description": "Fix the auth token expiry bug"}}'
 
-Stream events:
-
-```bash
+# Stream events
 curl -N http://localhost:7331/v1/runs/smi_abc123/events \
   -H "Authorization: Bearer sk-my-secret-token"
-```
 
-Approve a node:
-
-```bash
+# Approve a node
 curl -X POST http://localhost:7331/v1/runs/smi_abc123/nodes/deploy/approve \
   -H "Authorization: Bearer sk-my-secret-token" \
   -H "Content-Type: application/json" \
-  -d '{ "note": "Looks good, ship it", "decidedBy": "alice" }'
+  -d '{"note": "Looks good", "decidedBy": "alice"}'
 ```
