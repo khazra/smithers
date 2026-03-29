@@ -42,7 +42,7 @@ import {
 } from "./hijack-session";
 import { formatAge, formatElapsedCompact, formatEventLine } from "./format";
 import { detectAvailableAgents } from "./agent-detection";
-import { initWorkflowPack } from "./workflow-pack";
+import { initWorkflowPack, getWorkflowFollowUpCtas } from "./workflow-pack";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile } from "./workflows";
 import { ask } from "./ask";
 import { runScheduler } from "./scheduler";
@@ -526,6 +526,7 @@ async function executeUpCommand(
         cta: result.runId ? {
           description: "Next steps:",
           commands: [
+            ...getWorkflowFollowUpCtas(workflowPath),
             { command: `inspect ${result.runId}`, description: "Inspect run state" },
             { command: `logs ${result.runId}`, description: "View run logs" },
             { command: `chat ${result.runId}`, description: "View agent chat" },
@@ -555,6 +556,7 @@ async function executeUpCommand(
       cta: result.runId ? {
         description: "Next steps:",
         commands: [
+          ...getWorkflowFollowUpCtas(workflowPath),
           { command: `inspect ${result.runId}`, description: "Inspect run state" },
           { command: `logs ${result.runId}`, description: "View run logs" },
           { command: `chat ${result.runId}`, description: "View agent chat" },
@@ -1061,7 +1063,10 @@ const cli = Cli.create({
       let cleanup: (() => void) | undefined;
       let renderer: any;
       try {
-        const db = await findAndOpenDb();
+        const db = await findAndOpenDb(undefined, {
+          timeoutMs: 5000,
+          intervalMs: 100,
+        });
         const adapter = db.adapter;
         cleanup = db.cleanup;
 
