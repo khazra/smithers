@@ -3,18 +3,26 @@ title: Caching
 description: Reuse step outputs when the same workflow inputs and dependencies appear again.
 ---
 
-Caching in the builder API should be:
+Why does your workflow call the same agent twice with the same inputs?
 
-- **per-step**
-- **explicit**
-- **derived from declared inputs and dependencies**
-- **validated against the current output model before reuse**
+Think about it. If a step takes the same ticket ID, the same description, and the same model version -- and the model is deterministic enough for your purposes -- the second call is pure waste. You already have the answer. You paid for it once.
+
+Caching in Smithers lets you say: "I've seen this before. Use the old result."
+
+But here's the catch. Caching is only safe when you know *exactly* what "this" means. That's why Smithers caching is:
+
+- **per-step** -- not a global switch on the whole workflow
+- **explicit** -- you declare what matters in the cache key
+- **derived from declared inputs and dependencies** -- no hidden state
+- **validated against the current output model before reuse** -- stale shapes are rejected
 
 It should not depend on hidden renderer state or ad hoc prompt hashing.
 
 ## Step-Level Caching
 
 Caching belongs on the step that produces reusable work.
+
+Why per-step and not per-workflow? Because different steps have different purity profiles. A summarization step might be safely cacheable. A deployment step never is. Putting the cache declaration on the step forces you to make that judgment where it matters.
 
 For example:
 
@@ -34,11 +42,11 @@ This says:
 - key it from the declared `by` function
 - invalidate old entries if the algorithm or provider changes by bumping `version`
 
-That is a better fit for Effect workflows than a global workflow-wide cache switch.
+That is a better fit than a global workflow-wide cache switch.
 
 ## Default Mental Model
 
-The right mental model is:
+Here is the one sentence you should internalize:
 
 > A step is cacheable when it behaves like a pure function of its declared inputs.
 
@@ -51,6 +59,8 @@ If a step depends on:
 then Smithers can safely reuse a previous successful output for the same key.
 
 If a step has hidden side effects or reads mutable external state, it should not be cached by default.
+
+"But wait," you might think, "LLM calls aren't truly pure functions." Right. They're not. But for many use cases -- summarization, classification, structured extraction -- the outputs are stable *enough* that re-running them is waste, not value. You're caching the *work*, not asserting mathematical purity.
 
 ## What Goes Into the Cache Key
 
@@ -76,9 +86,13 @@ cache: {
 }
 ```
 
+Notice what's *not* in there: service instances, runtime objects, opaque graphs. Those aren't serializable, aren't stable, and aren't yours to hash. You pick the data that determines the output. Nothing more.
+
 This is better than attempting to hash arbitrary service graphs or opaque runtime objects.
 
 ## Why Explicit Keys Matter
+
+Imagine debugging a production workflow where a step returned a stale result. With magic cache keys, you'd be spelunking through framework internals trying to figure out what the cache thought was "the same." With explicit keys, you open the step definition and read it.
 
 Explicit keys make cache behavior reviewable.
 
@@ -93,6 +107,10 @@ Magic cache keys tend to break trust because users cannot predict when a step wi
 
 ## Cache Validation
 
+Here's a subtle problem. You cached a step's output last week. Since then, you changed the output schema -- added a field, tightened a type. The cached bytes still exist, keyed to the same inputs. Should Smithers blindly hand you the old shape?
+
+No.
+
 When Smithers finds a cache hit, it should still validate the cached payload against the current output model before reusing it.
 
 That protects against:
@@ -103,32 +121,37 @@ That protects against:
 
 If validation fails, Smithers should treat the entry as a miss and compute a fresh value.
 
+This is the safety net that makes caching practical in a system where output schemas evolve.
+
 ## Example
 
 ```ts
-const summarize = $.step("summarize", {
-  output: Summary,
-  needs: { analysis },
-  cache: {
+<Task
+  id="summarize"
+  output={outputs.summary}
+  agent={summarizer}
+  deps={{ analysis: outputs.analysis }}
+  cache={{
     by: ({ analysis }) => ({
       summary: analysis.summary,
       severity: analysis.severity,
     }),
     version: "summary-v1",
-  },
-  run: ({ analysis }) =>
-    Effect.succeed(
-      new Summary({
-        title: "Current Status",
-        body: analysis.summary,
-      }),
-    ),
-});
+  }}
+>
+  {({ analysis }) => `Write a current-status summary from this analysis:\n\n${analysis.summary}`}
+</Task>
 ```
 
-If the same `analysis` input appears again with the same cache version, Smithers can reuse the persisted `Summary`.
+If the same analysis appears again with the same cache version, Smithers can reuse the persisted `summary` row instead of calling the agent again.
+
+Read the `by` function. It tells you everything: this step's output depends on the analysis summary and the severity. Change either one, and you get a fresh call. Change neither, and you get the cached result. No guessing.
 
 ## What Should Not Be Cached
+
+Ask yourself: "If I replayed the cached output instead of running this step, would anything be wrong?"
+
+For a summarization step, no -- you'd get the same summary. For a deployment step, absolutely yes -- you'd skip the actual deploy.
 
 Caching is a bad fit for steps that are primarily about side effects.
 
@@ -157,7 +180,9 @@ cache: {
 }
 ```
 
-This keeps invalidation under user control.
+When you switch from Sonnet to Opus, bump the version string. The old cache entries become misses. This keeps invalidation under user control.
+
+You might wish Smithers could detect the model change automatically. But "which service details matter" is a judgment call only you can make. A logging service change doesn't invalidate outputs. A model provider change does. Smithers can't know that -- so it asks you to say it.
 
 ## Runtime Behavior
 
@@ -171,6 +196,8 @@ With caching enabled on a step, Smithers should:
 
 From the rest of the workflow's perspective, a cache hit behaves the same as a completed upstream step.
 
+That last point matters. Downstream steps don't know whether their dependency was computed fresh or pulled from cache. They see a completed step with a valid output. The abstraction is clean.
+
 ## Resume vs Cache
 
 Resuming and caching are related but distinct.
@@ -179,9 +206,13 @@ Resuming and caching are related but distinct.
 
 Resume reuses outputs from the same execution id.
 
+Your workflow crashed at step 4. You restart it. Steps 1 through 3 already succeeded in this run, so Smithers skips them. That's resume -- replaying within a single execution.
+
 ### Cache
 
 Cache reuses outputs across different executions when the declared cache key matches.
+
+You run a new workflow with the same ticket. The analysis step sees a cache hit from last Tuesday's run. That's caching -- reuse across executions.
 
 Resume is about durability. Cache is about recomputation.
 

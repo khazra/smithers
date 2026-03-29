@@ -170,23 +170,32 @@ The important part is that denial handling is declared in the workflow, not buri
 Because approvals are values, not only control flags, you can route explicitly:
 
 ```ts
-const approval = $.approval("approve-release", {
-  needs: { report },
-  request: ({ report }) => ({
-    title: `Publish ${report.title}?`,
-    summary: report.body,
-  }),
-  onDeny: "continue",
-});
+const approval = ctx.outputMaybe(outputs.approval, { nodeId: "approve-release" });
 
-return $.match(approval, {
-  when: (decision) => decision.approved,
-  then: () => $.step("publish", { output: Published, run: ... }),
-  else: () => $.step("record-rejection", { output: Rejection, run: ... }),
-});
+return (
+  <Workflow name="publish">
+    <Approval
+      id="approve-release"
+      output={outputs.approval}
+      request={{
+        title: `Publish ${report.title}?`,
+        summary: report.body,
+      }}
+      onDeny="continue"
+    />
+
+    {approval ? (
+      <Branch
+        if={approval.approved}
+        then={<Task id="publish" output={outputs.published}>{{ status: "published" }}</Task>}
+        else={<Task id="record-rejection" output={outputs.rejected}>{{ status: "rejected" }}</Task>}
+      />
+    ) : null}
+  </Workflow>
+);
 ```
 
-This is a better fit for builder-based workflows than implicit hidden states.
+This keeps the approval decision explicit in the rendered graph instead of hiding it inside scheduler-only state.
 
 Read the `Branch`. If approved, publish. If denied, record the rejection. Both paths are visible in the workflow definition, both produce typed outputs, both are part of the graph. No hidden conditional logic in the scheduler.
 
@@ -251,8 +260,8 @@ The control plane should target approval nodes directly.
 For example:
 
 ```bash
-smithers approve workflow.ts --run-id <id> --node-id approve-deploy --note "Ship it"
-smithers deny workflow.ts --run-id <id> --node-id approve-deploy --note "Blocked by QA"
+smithers approve <id> --node approve-deploy --note "Ship it"
+smithers deny <id> --node approve-deploy --note "Blocked by QA"
 ```
 
 The exact transport can vary, but the key should be `(runId, nodeId)`, not a hidden internal row id.
