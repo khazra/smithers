@@ -47,7 +47,6 @@ default.profraw
 deno.lock
 
 # Smithers runtime artifacts
-.smithers/
 .tui-test/
 .worktrees/
 reference/
