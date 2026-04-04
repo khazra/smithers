@@ -70,6 +70,17 @@ test.skip("smithers init writes the expected workflow-pack layout and it typeche
   expect(repo.exists(".smithers/workflows/improve-test-coverage.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/test-first.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/debug.tsx")).toBe(true);
+  expect(repo.exists(".smithers/workflows/grill-me.tsx")).toBe(true);
+  expect(repo.exists(".smithers/workflows/write-a-prd.tsx")).toBe(true);
+  expect(repo.exists(".smithers/workflows/feature-enum.tsx")).toBe(true);
+  expect(repo.exists(".smithers/workflows/audit.tsx")).toBe(true);
+  expect(repo.exists(".smithers/workflows/ticket-kanban.tsx")).toBe(true);
+  expect(repo.exists(".smithers/prompts/ask-user-instructions.mdx")).toBe(true);
+  expect(repo.exists(".smithers/components/GrillMe.tsx")).toBe(true);
+  expect(repo.exists(".smithers/components/CommandProbe.tsx")).toBe(true);
+  expect(repo.exists(".smithers/components/ForEachFeature.tsx")).toBe(true);
+  expect(repo.exists(".smithers/components/FeatureEnum.tsx")).toBe(true);
+  expect(repo.exists(".smithers/components/WriteAPrd.tsx")).toBe(true);
   expect(repo.exists(".smithers/tickets/.gitkeep")).toBe(true);
 
   const typecheck = spawnSync(process.execPath, ["run", "typecheck"], {
